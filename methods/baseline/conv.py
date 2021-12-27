@@ -9,6 +9,65 @@ from dgl._ffi.base import DGLError
 from dgl.nn.pytorch.utils import Identity
 from dgl.utils import expand_as_pair
 
+
+class HCGNNConv(nn.Module):
+    def __init__(self,in_dim,com_dim,dropout,bias,activation,num_etype,allow_zero_in_degree=False):
+        super(HCGNNConv, self).__init__()
+        self.in_dim=in_dim
+        self.com_dim=com_dim
+        self.dropout=dropout
+        self.bias=bias
+        self.activation=activation
+        self.num_etype=num_etype
+        self.multi_linear=nn.Parameter(th.FloatTensor(size=(num_etype, in_dim, com_dim)))     #num_etype*D*D_0
+        self._allow_zero_in_degree = allow_zero_in_degree
+        self.reset_parameters()
+    def reset_parameters(self):
+        gain = nn.init.calculate_gain('relu')
+        nn.init.xavier_normal_(self.multi_linear, gain=gain)
+    def set_allow_zero_in_degree(self, set_value):
+        self._allow_zero_in_degree = set_value
+    def forward(self,graph,feat,com_signal):
+        with graph.local_scope():
+            if not self._allow_zero_in_degree:
+                if (graph.in_degrees() == 0).any():
+                    raise DGLError('There are 0-in-degree nodes in the graph, '
+                                   'output for those nodes will be invalid. '
+                                   'This is harmful for some applications, '
+                                   'causing silent performance regression. '
+                                   'Adding self-loop on the input graph by '
+                                   'calling `g = dgl.add_self_loop(g)` will resolve '
+                                   'the issue. Setting ``allow_zero_in_degree`` '
+                                   'to be `True` when constructing this module will '
+                                   'suppress the check and let the code run.')
+            
+            
+            #message=cat((com_signal, processed_feat),dim=1)
+            etype_indexer=graph.edge_type_indexer.T.unsqueeze(-1).float()  #num_etype*E*1     #(0,0,...,1,....,0)   #每个位置对应一种edge type，1处代表这个edge是对应type
+            node_etype_collector=graph.node_etype_collector.T.unsqueeze(-1)   #num_etype*N*1   #(0,1,...,1,....,0)  每个位置对应一种edge type，1处代表这个node有对应type的边
+            feature_multi_modal=feat.unsqueeze(0).repeat(self.num_etype,1,1)*node_etype_collector  #num_etype*N*D
+            processed_feats=th.bmm(feature_multi_modal,self.multi_linear)*node_etype_collector  #num_etype*N*D_0
+            com_signal=com_signal.unsqueeze(0)   #1*N*D_0
+
+            mess=processed_feats+com_signal
+            #mess=th.bmm(decoder,processed_feats||com_signal)
+            graph.edata.update({'e': th.permute(etype_indexer,[1,2,0])}) # E*num_etype
+            graph.srcdata.update({"ft":th.permute(mess,[1,2,0])})
+            graph.update_all(fn.u_mul_e('ft', 'e', 'm'),
+                             fn.sum('m', 'ft'))
+            rst = graph.dstdata['ft']
+            rst=rst.sum(-1)
+
+
+
+            # bias
+            #if self.bias:
+                #rst = rst + self.bias_param
+            # activation
+            if self.activation:
+                rst = self.activation(rst)
+            return rst
+
 # pylint: enable=W0235
 class myGATConv(nn.Module):
     """

@@ -6,3 +6,4 @@ data/
 *.code-workspace
 *[0123456789].txt
 **plan.txt
+.pyc

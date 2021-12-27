@@ -5,7 +5,70 @@ from dgl.nn.pytorch import GraphConv
 
 import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax, GATConv
-from conv import myGATConv
+from conv import myGATConv,HCGNNConv
+
+class HeteroCGNN(nn.Module):  #heterogeneous communication graph neural networks
+    def __init__(self,g,num_etype,num_ntypes,num_layers,hiddens,dropout,num_classes,bias,activation,com_dim,ntype_dims,L2_norm,**kwargs):
+        super(HeteroCGNN, self).__init__()
+
+        self.g=g
+        self.num_layers = num_layers
+        self.num_etype=num_etype
+        self.dropout=nn.Dropout(dropout)
+        ntype_dims=ntype_dims
+        com_dim=com_dim
+        self.input_projections=nn.ModuleList([nn.Linear(in_dim, hiddens[0], bias=True) for in_dim in ntype_dims])
+        self.ntypeLinear=[]
+        self.activation=activation
+        for i in range(num_ntypes):
+            temp=[]
+            #temp.append(nn.Linear(ntype_dims[i],hiddens[0], bias=True))
+            for j in range(num_layers):
+                temp.append(nn.Linear(hiddens[j],hiddens[j+1]))
+            temp=nn.ModuleList(temp)
+            self.ntypeLinear.append(temp)
+        self.ntypeLinear=nn.ModuleList(self.ntypeLinear)
+        #self.ntypeLinear=nn.ModuleList([  nn.ModuleList( [nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims] )     for num_hidden in hiddens      ])
+        self.convs=[]
+        for i in range(num_layers):
+            self.convs.append(HCGNNConv(in_dim=hiddens[i],com_dim=com_dim,dropout=dropout,bias=bias,activation=activation,num_etype=num_etype))
+        self.convs=nn.ModuleList(self.convs)
+        self.prediction_linear=nn.Linear(hiddens[-1]+com_dim,num_classes)
+        self.epsilon = torch.FloatTensor([1e-12]).cuda()
+        #initialize communication signals
+        self.com_signal=torch.zeros(self.g.num_nodes(),com_dim)
+        self.L2_norm=L2_norm
+
+
+    def forward(self, features_list,e_feat):
+        node_idx_by_ntype=self.g.node_idx_by_ntype
+        node_ntype_indexer =self.g.node_ntype_indexer #N*num_ntype    #每个node可不可以有属于其他node的语义
+        h = []
+        for fc, feature in zip(self.input_projections, features_list):
+            h.append(fc(feature))   # the id is decided by the node types
+        h = torch.cat(h, 0)
+        com_signal=self.com_signal.to(features_list[0].device)
+        for i in range(self.num_layers):
+            com_signal=self.convs[i](self.g,h,com_signal)
+            h_new=[]
+            for type_count,idx in enumerate(node_idx_by_ntype):
+                h_new.append(self.activation(self.dropout(self.ntypeLinear[type_count][i](h[idx,:]))))
+            h = torch.cat(h_new, 0)
+        h=torch.cat((h,com_signal),dim=1)
+        logits=self.prediction_linear(h)
+        if self.L2_norm:
+            logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
+        return logits
+            
+
+        
+
+
+
+
+
+
+
 
 class myGAT(nn.Module):
     def __init__(self,
@@ -48,9 +111,11 @@ class myGAT(nn.Module):
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
     def forward(self, features_list, e_feat):
+
+
         h = []
         for fc, feature in zip(self.fc_list, features_list):
-            h.append(fc(feature))
+            h.append(fc(feature))   # the id is decided by the node types
         h = torch.cat(h, 0)
         res_attn = None
         for l in range(self.num_layers):

@@ -1,4 +1,6 @@
 import sys
+import pickle
+from numpy.core.numeric import identity
 sys.path.append('../../')
 import time
 import argparse
@@ -10,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT
+from GNN import myGAT,HeteroCGNN
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -42,6 +44,9 @@ def mat2tensor(mat):
 
 def run_model_DBLP(args):
     feats_type = args.feats_type
+    com_dim=args.com_dim
+    L2_norm=True
+    hiddens=[int(i) for i in args.hiddens.split()]
     features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
     exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                    f"\n\tedge num: {adjM.nnz}"+\
@@ -94,29 +99,93 @@ def run_model_DBLP(args):
     test_idx = train_val_test_idx['test_idx']
     test_idx = np.sort(test_idx)
     
-    edge2type = {}
-    for k in dl.links['data']:
-        for u,v in zip(*dl.links['data'][k].nonzero()):
-            edge2type[(u,v)] = k
-    for i in range(dl.nodes['total']):
-        if (i,i) not in edge2type:
-            edge2type[(i,i)] = len(dl.links['count'])
-    for k in dl.links['data']:
-        for u,v in zip(*dl.links['data'][k].nonzero()):
-            if (v,u) not in edge2type:
-                edge2type[(v,u)] = k+1+len(dl.links['count'])
+    if os.path.exists(f"./temp/{args.dataset}.ett"):
+        with open(f"./temp/{args.dataset}.ett","rb") as f:
+             edge2type=pickle.load(f)
+    else:
+        edge2type = {}
+        for k in dl.links['data']:
+            for u,v in zip(*dl.links['data'][k].nonzero()):
+                edge2type[(u,v)] = k
+        for i in range(dl.nodes['total']):
+            if (i,i) not in edge2type:
+                edge2type[(i,i)] = len(dl.links['count'])
+        for k in dl.links['data']:
+            for u,v in zip(*dl.links['data'][k].nonzero()):
+                if (v,u) not in edge2type:
+                    edge2type[(v,u)] = k+1+len(dl.links['count'])
+        with open(f"./temp/{args.dataset}.ett","wb") as f:
+            pickle.dump(edge2type,f)
+        
     
 
     g = dgl.DGLGraph(adjM+(adjM.T))
     g = dgl.remove_self_loop(g)
     g = dgl.add_self_loop(g)
     g = g.to(device)
-    e_feat = []
-    for u, v in zip(*g.edges()):
-        u = u.cpu().item()
-        v = v.cpu().item()
-        e_feat.append(edge2type[(u,v)])
-    e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
+    #reorganize the edge ids
+    if os.path.exists(f"./temp/{args.dataset}.eft"):
+        with open(f"./temp/{args.dataset}.eft","rb") as f:
+             e_feat=pickle.load(f)
+    else:
+        e_feat = []
+        count=0
+        count_mappings={}
+        counted_dict={}
+        for u, v in zip(*g.edges()):
+            u = u.cpu().item()
+            v = v.cpu().item()
+            if not counted_dict.setdefault(edge2type[(u,v)],False) :
+                count_mappings[edge2type[(u,v)]]=count
+                counted_dict[edge2type[(u,v)]]=True
+                count+=1
+            e_feat.append(count_mappings[edge2type[(u,v)]])
+        e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
+        with open(f"./temp/{args.dataset}.eft","wb") as f:
+            pickle.dump(e_feat,f)
+
+
+
+
+    g.edge_type_indexer=F.one_hot(e_feat).to(device)
+
+    if os.path.exists(f"./temp/{args.dataset}.nec"):
+        with open(f"./temp/{args.dataset}.nec","rb") as f:
+             g.node_etype_collector=pickle.load(f).to(device)
+    else:
+        g.node_etype_collector=torch.zeros(dl.nodes['total'],g.edge_type_indexer.shape[1]).to(device)
+        for u, v,etype in zip(*g.edges(),e_feat):
+            u = u.cpu().item()
+            v = v.cpu().item()
+            etype=etype.cpu().item()
+            g.node_etype_collector[u,etype]=1
+        with open(f"./temp/{args.dataset}.nec","wb") as f:
+            pickle.dump(g.node_etype_collector,f)
+    
+    num_etype=g.edge_type_indexer.shape[1]
+    num_ntypes=len(features_list)
+    num_layers=len(hiddens)-1
+    num_nodes=dl.nodes['total']
+    g.node_idx_by_ntype=[]
+    g.node_ntype_indexer=torch.zeros(num_nodes,num_ntypes).to(device)
+    ntype_dims=[]
+    idx_count=0
+    ntype_count=0
+    for feature in features_list:
+        temp=[]
+        for _ in feature:
+            temp.append(idx_count)
+            g.node_ntype_indexer[idx_count][ntype_count]=1
+            idx_count+=1
+
+        g.node_idx_by_ntype.append(temp)
+        ntype_dims.append(feature.shape[1])
+        ntype_count+=1
+
+    if args.activation=="elu":
+        activation=F.elu
+    else:
+        activation=torch.nn.Identity()
     
     ma_F1s=[]
     mi_F1s=[]
@@ -124,7 +193,8 @@ def run_model_DBLP(args):
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
         heads = [args.num_heads] * args.num_layers + [1]
-        net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
+        #net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
+        net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm)
         net.to(device)
         optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -199,6 +269,7 @@ if __name__ == '__main__':
                         '4 - only term features (id vec for others);' + 
                         '5 - only term features (zero vec for others).')
     ap.add_argument('--hidden-dim', type=int, default=64, help='Dimension of the node hidden state. Default is 64.')
+    ap.add_argument('--com_dim', type=int, default=64 )
     ap.add_argument('--num-heads', type=int, default=8, help='Number of the attention heads. Default is 8.')
     ap.add_argument('--epoch', type=int, default=300, help='Number of epochs.')
     ap.add_argument('--patience', type=int, default=30, help='Patience.')
@@ -212,7 +283,9 @@ if __name__ == '__main__':
     ap.add_argument('--edge-feats', type=int, default=64)
     ap.add_argument('--run', type=int, default=1)
     ap.add_argument('--gpu', type=str, default="0")
-
+    ap.add_argument('--hiddens', type=str, default="64 32")
+    ap.add_argument('--activation', type=str, default="elu")
+    ap.add_argument('--bias', type=str, default="true")
     args = ap.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
