@@ -11,16 +11,22 @@ from dgl.utils import expand_as_pair
 
 
 class HCGNNConv(nn.Module):
-    def __init__(self,in_dim,com_dim,dropout,bias,activation,num_etype,allow_zero_in_degree=False):
+    def __init__(self,in_dim,com_dim,dropout,bias,activation,num_etype,num_heads,negative_slope,allow_zero_in_degree=False):
         super(HCGNNConv, self).__init__()
         self.in_dim=in_dim
         self.com_dim=com_dim
         self.dropout=dropout
+        self.attn_drop = nn.Dropout(dropout)
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
         self.bias=bias
         self.activation=activation
         self.num_etype=num_etype
         self.multi_linear=nn.Parameter(th.FloatTensor(size=(num_etype, in_dim, com_dim)))     #num_etype*D*D_0
         self._allow_zero_in_degree = allow_zero_in_degree
+        self.attn_l=nn.Parameter(th.FloatTensor(size=(num_etype,1, num_heads, com_dim)))
+        self.attn_r=nn.Parameter(th.FloatTensor(size=(num_etype,1, num_heads, com_dim)))
+        assert com_dim % num_heads==0
+        self.fc=nn.Parameter(th.FloatTensor(size=(com_dim*num_heads, com_dim)))
         self.reset_parameters()
     def reset_parameters(self):
         gain = nn.init.calculate_gain('relu')
@@ -44,21 +50,39 @@ class HCGNNConv(nn.Module):
             
             #message=cat((com_signal, processed_feat),dim=1)
             etype_indexer=graph.edge_type_indexer.T.unsqueeze(-1).float()  #num_etype*E*1     #(0,0,...,1,....,0)   #每个位置对应一种edge type，1处代表这个edge是对应type
+            etype_indexer=etype_indexer.unsqueeze(2)          #for multi-head
+
             node_etype_collector=graph.node_etype_collector.T.unsqueeze(-1)   #num_etype*N*1   #(0,1,...,1,....,0)  每个位置对应一种edge type，1处代表这个node有对应type的边
             feature_multi_modal=feat.unsqueeze(0).repeat(self.num_etype,1,1)*node_etype_collector  #num_etype*N*D
             processed_feats=th.bmm(feature_multi_modal,self.multi_linear)*node_etype_collector  #num_etype*N*D_0
             com_signal=com_signal.unsqueeze(0)   #1*N*D_0
 
-            mess=processed_feats+com_signal
+
+
+            mess=processed_feats+com_signal  #num_etype*N*D_0
+            #mess=mess@self.fc   #num_etype*N*(D_0/num_heads)
+            mess=mess.unsqueeze(2) #num_etype*N*1*D_0
+
+            #是跟s_i做还是跟x_i做attention的计算？
+            el = (mess * self.attn_l).sum(dim=-1).unsqueeze(-1)#num_etype*N*num_head*1
+            er = (mess * self.attn_r).sum(dim=-1).unsqueeze(-1) #num_etype*N*num_head*1
             #mess=th.bmm(decoder,processed_feats||com_signal)
-            graph.edata.update({'e': th.permute(etype_indexer,[1,2,0])}) # E*num_etype
-            graph.srcdata.update({"ft":th.permute(mess,[1,2,0])})
+            #construct attention 
+            graph.srcdata.update({ 'el': th.permute(el,[1,2,3,0])})
+            graph.dstdata.update({'er':th.permute(er,[1,2,3,0])})
+            graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
+            e=self.attn_drop(edge_softmax(graph,self.leaky_relu(graph.edata.pop('e'))))
+            e=e*th.permute(etype_indexer,[1,2,3,0])
+
+
+            graph.edata.update({'e': e}) # E*  num_heads * 1 *num_etype
+            graph.srcdata.update({"ft":th.permute(mess,[1,2,3,0])})
             graph.update_all(fn.u_mul_e('ft', 'e', 'm'),
                              fn.sum('m', 'ft'))
             rst = graph.dstdata['ft']
-            rst=rst.sum(-1)
-
-
+            rst=rst.sum(-1)  # N * num_heads * D_0
+            rst=rst.sum(1) # N * (num_heads * D_0)
+            #rst=rst@self.fc
 
             # bias
             #if self.bias:

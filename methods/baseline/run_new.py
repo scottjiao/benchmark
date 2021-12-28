@@ -46,7 +46,9 @@ def run_model_DBLP(args):
     feats_type = args.feats_type
     com_dim=args.com_dim
     L2_norm=True
-    hiddens=[int(i) for i in args.hiddens.split()]
+    num_heads=args.num_heads
+    #num_heads=1
+    hiddens=[int(i) for i in args.hiddens.split("_")]
     features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
     exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                    f"\n\tedge num: {adjM.nnz}"+\
@@ -194,7 +196,7 @@ def run_model_DBLP(args):
         num_classes = dl.labels_train['num_classes']
         heads = [args.num_heads] * args.num_layers + [1]
         #net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
-        net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm)
+        net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
         optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -283,7 +285,7 @@ if __name__ == '__main__':
     ap.add_argument('--edge-feats', type=int, default=64)
     ap.add_argument('--run', type=int, default=1)
     ap.add_argument('--gpu', type=str, default="0")
-    ap.add_argument('--hiddens', type=str, default="64 32")
+    ap.add_argument('--hiddens', type=str, default="64_32")
     ap.add_argument('--activation', type=str, default="elu")
     ap.add_argument('--bias', type=str, default="true")
     args = ap.parse_args()

@@ -8,7 +8,7 @@ from dgl.nn.pytorch import edge_softmax, GATConv
 from conv import myGATConv,HCGNNConv
 
 class HeteroCGNN(nn.Module):  #heterogeneous communication graph neural networks
-    def __init__(self,g,num_etype,num_ntypes,num_layers,hiddens,dropout,num_classes,bias,activation,com_dim,ntype_dims,L2_norm,**kwargs):
+    def __init__(self,g,num_etype,num_ntypes,num_layers,hiddens,dropout,num_classes,bias,activation,com_dim,ntype_dims,L2_norm,num_heads,negative_slope,**kwargs):
         super(HeteroCGNN, self).__init__()
 
         self.g=g
@@ -31,7 +31,7 @@ class HeteroCGNN(nn.Module):  #heterogeneous communication graph neural networks
         #self.ntypeLinear=nn.ModuleList([  nn.ModuleList( [nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims] )     for num_hidden in hiddens      ])
         self.convs=[]
         for i in range(num_layers):
-            self.convs.append(HCGNNConv(in_dim=hiddens[i],com_dim=com_dim,dropout=dropout,bias=bias,activation=activation,num_etype=num_etype))
+            self.convs.append(HCGNNConv(in_dim=hiddens[i],com_dim=com_dim,dropout=dropout,bias=bias,activation=activation,num_etype=num_etype,num_heads=num_heads,negative_slope=negative_slope))
         self.convs=nn.ModuleList(self.convs)
         self.prediction_linear=nn.Linear(hiddens[-1]+com_dim,num_classes)
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
