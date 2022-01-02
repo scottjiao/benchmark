@@ -12,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT,HeteroCGNN
+from GNN import myGAT,HeteroCGNN,changedGAT
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -42,18 +42,30 @@ def mat2tensor(mat):
         return torch.from_numpy(mat).type(torch.FloatTensor)
     return sp_to_spt(mat)
 
+
+
+
+
 def run_model_DBLP(args):
     feats_type = args.feats_type
     com_dim=args.com_dim
     L2_norm=True
     num_heads=args.num_heads
+
+    n_type_mappings=eval(args.n_type_mappings)
+    res_n_type_mappings=eval(args.res_n_type_mappings)
+    if res_n_type_mappings:
+        assert n_type_mappings 
+
+
+
     #num_heads=1
     hiddens=[int(i) for i in args.hiddens.split("_")]
     features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
     exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                    f"\n\tedge num: {adjM.nnz}"+\
                    f"\n\tclass num: {max(labels)+1}"+\
-                   f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[args.feats_type]}"+"\n"+f"exp setting: {vars(args)}"
+                   f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[args.feats_type]}"+"\n"+f"exp setting: {vars(args)}"+"\n"
     print(exp_info)
 
     torch.manual_seed(1234)
@@ -195,14 +207,24 @@ def run_model_DBLP(args):
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
         heads = [args.num_heads] * args.num_layers + [1]
-        #net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
-        net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
+        if args.net=='myGAT':
+            net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
+        elif args.net=='changedGAT':
+            net = changedGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings)
+        print(f"model using: {net.__class__.__name__}")
+        print(net)
+        #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
         optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
         # training loop
         net.train()
-        early_stopping = EarlyStopping(patience=args.patience, verbose=True, save_path='checkpoint/checkpoint_{}_{}_re_{}_feat_{}.pt'.format(args.dataset, args.num_layers,re,args.feats_type))
+        t=time.localtime()
+        str_t=f"{t.tm_year:0>4d}{t.tm_mon:0>2d}{t.tm_hour:0>2d}{t.tm_min:0>2d}{t.tm_sec:0>2d}{int(time.time()*1000)%1000}"
+        ckp_dname=os.path.join('checkpoint',str_t)
+        os.mkdir(ckp_dname)
+        ckp_fname=os.path.join(ckp_dname,'checkpoint_{}_{}_re_{}_feat_{}_heads_{}_{}.pt'.format(args.dataset, args.num_layers,re,args.feats_type,args.num_heads,net.__class__.__name__))
+        early_stopping = EarlyStopping(patience=args.patience, verbose=True, save_path=ckp_fname)
         for epoch in range(args.epoch):
             t_0_start = time.time()
             # training
@@ -240,7 +262,7 @@ def run_model_DBLP(args):
                 break
 
         # testing with evaluate_results_nc
-        net.load_state_dict(torch.load('checkpoint/checkpoint_{}_{}_re_{}_feat_{}.pt'.format(args.dataset, args.num_layers,re,args.feats_type)))
+        net.load_state_dict(torch.load(ckp_fname))
         net.eval()
         test_logits = []
         with torch.no_grad():
@@ -256,9 +278,16 @@ def run_model_DBLP(args):
         mi_F1s.append(d["micro-f1"])
         t_re1=time.time();t_re=t_re1-t_re0
         print(f" this round cost {t_re}(s)")
+        remove_ckp_files(ckp_dname=ckp_dname)
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}")
     print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info)
+    print(net)
+
+def remove_ckp_files(ckp_dname):
+    import shutil
+    shutil.rmtree(ckp_dname)
+    #os.mkdir(ckp_dname)
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description='MRGNN testing for the DBLP dataset')
@@ -288,7 +317,11 @@ if __name__ == '__main__':
     ap.add_argument('--hiddens', type=str, default="64_32")
     ap.add_argument('--activation', type=str, default="elu")
     ap.add_argument('--bias', type=str, default="true")
+    ap.add_argument('--net', type=str, default="myGAT")
+    ap.add_argument('--n_type_mappings', type=str, default="False")
+    ap.add_argument('--res_n_type_mappings', type=str, default="False")
     args = ap.parse_args()
+
 
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
 

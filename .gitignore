@@ -1,9 +1,11 @@
 data/
 **/checkpoint
+**/log
 **/results
 *.vscode
 **/__MACOSX
 *.code-workspace
 *[0123456789].txt
 **plan.txt
-.pyc
+*.pyc
+*.db
