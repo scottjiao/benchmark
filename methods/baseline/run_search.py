@@ -377,6 +377,8 @@ def run_model_DBLP(trial=None):
             f.write(str(exp_info)+"\n")
             f.write(str(net)+"\n")
 
+    return score
+
 def remove_ckp_files(ckp_dname):
     import shutil
     shutil.rmtree(ckp_dname)
