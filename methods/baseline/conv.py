@@ -317,7 +317,8 @@ class changedGATConv(nn.Module):
             nn.init.xavier_normal_(self.fc_dst.weight, gain=gain)
         nn.init.xavier_normal_(self.attn_l, gain=gain)
         nn.init.xavier_normal_(self.attn_r, gain=gain)
-        nn.init.xavier_normal_(self.attn_e, gain=gain)
+        if not self.etype_specified_attention:
+            nn.init.xavier_normal_(self.attn_e, gain=gain)
         if isinstance(self.res_fc, nn.Linear):
             if self.res_n_type_mappings:
                 for m in self.res_fc:
@@ -370,19 +371,22 @@ class changedGATConv(nn.Module):
 
                 if graph.is_block:
                     feat_dst = feat_src[:graph.number_of_dst_nodes()]
-            e_feat = self.edge_emb(e_feat)
-            e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)
-            ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1)
 
             
             if self.etype_specified_attention:
-                el = (feat_src.unsqueeze(-1) * self.attn_l).sum(dim=-1).unsqueeze(-1) #num_nodes*heads*dim*num_etype   1*heads*dim*1   
-                er = (feat_dst.unsqueeze(-1) * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                el = (feat_src.unsqueeze(-1) * self.attn_l).sum(dim=2).unsqueeze(2) #num_nodes*heads*dim*num_etype   1*heads*dim*1   
+                er = (feat_dst.unsqueeze(-1) * self.attn_r).sum(dim=2).unsqueeze(2)
                 graph.srcdata.update({'ft': feat_src, 'el': el})
                 graph.dstdata.update({'er': er})
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))  #  num_edges*heads*1*num_etype
                 e=self.leaky_relu((graph.edata.pop('e')*self.eindexer).sum(-1))
+
+
+
             else:
+                e_feat = self.edge_emb(e_feat)
+                e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)
+                ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1)
                 el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
                 er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
                 graph.srcdata.update({'ft': feat_src, 'el': el})

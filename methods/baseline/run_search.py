@@ -54,9 +54,10 @@ ap.add_argument('--net', type=str, default="myGAT")
 ap.add_argument('--n_type_mappings', type=str, default="False")
 ap.add_argument('--res_n_type_mappings', type=str, default="False")
 ap.add_argument('--study_name', type=str, default="temp")
-ap.add_argument('--study_storage', type=str, default="temp")
+ap.add_argument('--study_storage', type=str, default="sqlite:///temp.db")
 ap.add_argument('--trial_num', type=int, default=50)
 ap.add_argument('--etype_specified_attention', type=str, default="False")
+ap.add_argument('--verbose', type=str, default="False")
 args = ap.parse_args()
 
 
@@ -102,11 +103,11 @@ def run_model_DBLP(trial=None):
     weight_decay=args.weight_decay
     hidden_dim=args.hidden_dim
     num_layers=args.num_layers"""
-    num_heads=trial.suggest_categorical("num_heads", [6,8,10])
-    lr=trial.suggest_categorical("lr", [5e-3,1e-3,5e-4,1e-4])
-    weight_decay=trial.suggest_categorical("weight_decay", [5e-3,1e-3,5e-4,1e-4])
-    hidden_dim=trial.suggest_categorical("hidden_dim", [32,64,128])
-    num_layers=trial.suggest_categorical("num_layers", [1,2,3])
+    num_heads=trial.suggest_categorical("num_heads", [4])
+    lr=trial.suggest_categorical("lr", [1e-3,5e-4,1e-4])
+    weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
+    hidden_dim=trial.suggest_categorical("hidden_dim", [32])
+    num_layers=trial.suggest_categorical("num_layers", [2])
 
 
     n_type_mappings=eval(args.n_type_mappings)
@@ -181,10 +182,14 @@ def run_model_DBLP(trial=None):
         for i in range(dl.nodes['total']):
             if (i,i) not in edge2type:
                 edge2type[(i,i)] = len(dl.links['count'])
+        count=1
         for k in dl.links['data']:
             for u,v in zip(*dl.links['data'][k].nonzero()):
                 if (v,u) not in edge2type:
-                    edge2type[(v,u)] = k+1+len(dl.links['count'])
+                    edge2type[(v,u)] = count+1+len(dl.links['count'])
+                    count+=1
+
+        #this operation will make gap of etype ids.
         with open(f"./temp/{args.dataset}.ett","wb") as f:
             pickle.dump(edge2type,f)
         
@@ -279,9 +284,9 @@ def run_model_DBLP(trial=None):
         if args.net=='myGAT':
             net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
         elif args.net=='changedGAT':
-            net = changedGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer)
-        #print(f"model using: {net.__class__.__name__}")
-        #print(net)
+            net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer)
+        print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
+        print(net)  if args.verbose=="True" else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
         optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
@@ -322,8 +327,8 @@ def run_model_DBLP(trial=None):
                 val_loss = F.nll_loss(logp[val_idx], labels[val_idx])
             t_1_end = time.time()
             # print validation info
-            #print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f}'.format(
-               # epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start))
+            print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f}'.format(
+                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start)) if args.verbose=="True" else None
             # early stopping
             early_stopping(val_loss, net)
             if early_stopping.early_stop:
@@ -364,7 +369,7 @@ def run_model_DBLP(trial=None):
             dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"{args.dataset}_{args.run}.txt")
             pred = onehot[pred]
             d=dl.evaluate(pred)
-            #print(d)
+            print(d) if args.verbose=="True" else None
         ma_F1s.append(d["macro-f1"])
         mi_F1s.append(d["micro-f1"])
         t_re1=time.time();t_re=t_re1-t_re0

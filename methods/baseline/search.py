@@ -18,6 +18,8 @@ task_to_evaluate=[{"n_type_mappings":"True", "res_n_type_mappings":"True"},{"n_t
 gpus=["0","1"]
 total_trial_num=30
 
+
+
 for dataset,worker_num in dataset_to_evaluate:
     for task in task_to_evaluate:
         study_name=f"node_added_simpleHGN_{dataset}_n_type_mappings_{task['n_type_mappings']}_res_{task['res_n_type_mappings']}"
