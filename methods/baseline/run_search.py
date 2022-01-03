@@ -37,7 +37,7 @@ ap.add_argument('--com_dim', type=int, default=64 )
 ap.add_argument('--num-heads', type=int, default=8, help='Number of the attention heads. Default is 8.')
 ap.add_argument('--epoch', type=int, default=300, help='Number of epochs.')
 ap.add_argument('--patience', type=int, default=30, help='Patience.')
-ap.add_argument('--repeat', type=int, default=30, help='Repeat the training and testing for N times. Default is 1.')
+ap.add_argument('--repeat', type=int, default=20, help='Repeat the training and testing for N times. Default is 1.')
 ap.add_argument('--num-layers', type=int, default=2)
 ap.add_argument('--lr', type=float, default=5e-4)
 ap.add_argument('--dropout', type=float, default=0.5)
@@ -101,9 +101,9 @@ def run_model_DBLP(trial=None):
     weight_decay=args.weight_decay
     hidden_dim=args.hidden_dim
     num_layers=args.num_layers"""
-    num_heads=trial.suggest_categorical("num_heads", [6,8,10])
-    lr=trial.suggest_categorical("lr", [5e-3,1e-3,5e-4,1e-4])
-    weight_decay=trial.suggest_categorical("weight_decay", [5e-3,1e-3,5e-4,1e-4])
+    num_heads=trial.suggest_categorical("num_heads", [8,10])
+    lr=trial.suggest_categorical("lr", [1e-3,5e-4,1e-4])
+    weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
     hidden_dim=trial.suggest_categorical("hidden_dim", [32,64,128])
     num_layers=trial.suggest_categorical("num_layers", [1,2,3])
 
