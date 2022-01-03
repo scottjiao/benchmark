@@ -56,6 +56,7 @@ ap.add_argument('--res_n_type_mappings', type=str, default="False")
 ap.add_argument('--study_name', type=str, default="temp")
 ap.add_argument('--study_storage', type=str, default="temp")
 ap.add_argument('--trial_num', type=int, default=50)
+ap.add_argument('--etype_specified_attention', type=str, default="False")
 args = ap.parse_args()
 
 
@@ -234,7 +235,7 @@ def run_model_DBLP(trial=None):
     
     num_etype=g.edge_type_indexer.shape[1]
     num_ntypes=len(features_list)
-    num_layers=len(hiddens)-1
+    #num_layers=len(hiddens)-1
     num_nodes=dl.nodes['total']
     g.node_idx_by_ntype=[]
     g.node_ntype_indexer=torch.zeros(num_nodes,num_ntypes).to(device)
@@ -257,17 +258,28 @@ def run_model_DBLP(trial=None):
     else:
         activation=torch.nn.Identity()
     
+
+
+    etype_specified_attention=eval(args.etype_specified_attention)
+    eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
+
+
+
+
+
+
+
     ma_F1s=[]
     mi_F1s=[]
     val_accs=[]
     for re in range(args.repeat):
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
-        heads = [num_heads] * args.num_layers + [1]
+        heads = [num_heads] * num_layers + [1]
         if args.net=='myGAT':
             net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
         elif args.net=='changedGAT':
-            net = changedGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings)
+            net = changedGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer)
         #print(f"model using: {net.__class__.__name__}")
         #print(net)
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)

@@ -245,7 +245,7 @@ class changedGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None):
         super(changedGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -255,6 +255,8 @@ class changedGATConv(nn.Module):
         self.edge_emb = nn.Embedding(num_etypes, edge_feats)
         self.n_type_mappings=n_type_mappings
         self.res_n_type_mappings=res_n_type_mappings
+        self.etype_specified_attention=etype_specified_attention
+        self.eindexer=eindexer
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
                 self._in_src_feats, out_feats * num_heads, bias=False)
@@ -269,9 +271,13 @@ class changedGATConv(nn.Module):
                 self.fc =nn.ModuleList([nn.Linear(
                     self._in_src_feats, out_feats * num_heads, bias=False)  for _ in range(num_ntype)] )
         self.fc_e = nn.Linear(edge_feats, edge_feats*num_heads, bias=False)
-        self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-        self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-        self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
+        if self.etype_specified_attention:
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
+            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
+        else:
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
+            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
+            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
         self.leaky_relu = nn.LeakyReLU(negative_slope)
@@ -367,13 +373,23 @@ class changedGATConv(nn.Module):
             e_feat = self.edge_emb(e_feat)
             e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)
             ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1)
-            el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
-            er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
-            graph.srcdata.update({'ft': feat_src, 'el': el})
-            graph.dstdata.update({'er': er})
-            graph.edata.update({'ee': ee})
-            graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
-            e = self.leaky_relu(graph.edata.pop('e')+graph.edata.pop('ee'))
+
+            
+            if self.etype_specified_attention:
+                el = (feat_src.unsqueeze(-1) * self.attn_l).sum(dim=-1).unsqueeze(-1) #num_nodes*heads*dim*num_etype   1*heads*dim*1   
+                er = (feat_dst.unsqueeze(-1) * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                graph.srcdata.update({'ft': feat_src, 'el': el})
+                graph.dstdata.update({'er': er})
+                graph.apply_edges(fn.u_add_v('el', 'er', 'e'))  #  num_edges*heads*1*num_etype
+                e=self.leaky_relu((graph.edata.pop('e')*self.eindexer).sum(-1))
+            else:
+                el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
+                er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                graph.srcdata.update({'ft': feat_src, 'el': el})
+                graph.dstdata.update({'er': er})
+                graph.edata.update({'ee': ee})
+                graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
+                e = self.leaky_relu(graph.edata.pop('e')+graph.edata.pop('ee'))
             # compute softmax
             graph.edata['a'] = self.attn_drop(edge_softmax(graph, e))
             if res_attn is not None:
