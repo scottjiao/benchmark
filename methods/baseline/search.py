@@ -16,7 +16,7 @@ class Run( multiprocessing.Process):
 dataset_to_evaluate=[("pubmed_HNE_complete",1),("DBLP_HNE_sampled",1)]
 task_to_evaluate=[{"n_type_mappings":"True", "res_n_type_mappings":"True"},{"n_type_mappings":"True", "res_n_type_mappings":"False"},{"n_type_mappings":"False", "res_n_type_mappings":"False"}]
 gpus=["0","1"]
-total_trial_num=50
+total_trial_num=30
 
 for dataset,worker_num in dataset_to_evaluate:
     for task in task_to_evaluate:
@@ -27,7 +27,7 @@ for dataset,worker_num in dataset_to_evaluate:
         process_queue=[]
         for gpu in gpus:
             for _ in range(worker_num):
-                command=f"python run_search.py --net changedGAT  --feats-type 0 --dataset {dataset} --gpu {gpu} --trial_num {trial_num} --study_name {study_name} --study_storage {study_storage}"
+                command=f"python run_search.py --net changedGAT  --feats-type 0 --dataset {dataset} --gpu {gpu} --trial_num {trial_num} --study_name {study_name} --study_storage {study_storage} --n_type_mappings {task['n_type_mappings']} --res_n_type_mappings {task['res_n_type_mappings']}  "
                 p=Run(command)
                 p.daemon=True
                 p.start()
