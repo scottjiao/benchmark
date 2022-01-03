@@ -234,7 +234,7 @@ def run_model_DBLP(trial=None):
     
     num_etype=g.edge_type_indexer.shape[1]
     num_ntypes=len(features_list)
-    num_layers=len(hiddens)-1
+    #num_layers=len(hiddens)-1
     num_nodes=dl.nodes['total']
     g.node_idx_by_ntype=[]
     g.node_ntype_indexer=torch.zeros(num_nodes,num_ntypes).to(device)
@@ -263,7 +263,7 @@ def run_model_DBLP(trial=None):
     for re in range(args.repeat):
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
-        heads = [num_heads] * args.num_layers + [1]
+        heads = [num_heads] * num_layers + [1]
         if args.net=='myGAT':
             net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
         elif args.net=='changedGAT':
