@@ -58,6 +58,8 @@ ap.add_argument('--study_storage', type=str, default="sqlite:///temp.db")
 ap.add_argument('--trial_num', type=int, default=50)
 ap.add_argument('--etype_specified_attention', type=str, default="False")
 ap.add_argument('--verbose', type=str, default="False")
+ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
+ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
 args = ap.parse_args()
 
 
@@ -103,12 +105,13 @@ def run_model_DBLP(trial=None):
     weight_decay=args.weight_decay
     hidden_dim=args.hidden_dim
     num_layers=args.num_layers"""
-    num_heads=trial.suggest_categorical("num_heads", [4])
+    num_heads=trial.suggest_categorical("num_heads", [8])
     lr=trial.suggest_categorical("lr", [1e-3,5e-4,1e-4])
     weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
-    hidden_dim=trial.suggest_categorical("hidden_dim", [32])
+    hidden_dim=trial.suggest_categorical("hidden_dim", [64,128])
     num_layers=trial.suggest_categorical("num_layers", [2])
-
+    ae_layer=args.ae_layer
+    ae_sampling_factor=args.ae_sampling_factor
 
     n_type_mappings=eval(args.n_type_mappings)
     res_n_type_mappings=eval(args.res_n_type_mappings)
@@ -257,6 +260,7 @@ def run_model_DBLP(trial=None):
         g.node_idx_by_ntype.append(temp)
         ntype_dims.append(feature.shape[1])
         ntype_count+=1
+    ntypes=g.node_ntype_indexer.argmax(1)
 
     if args.activation=="elu":
         activation=F.elu
@@ -272,7 +276,7 @@ def run_model_DBLP(trial=None):
 
 
 
-
+    ntype_acc=0
 
     ma_F1s=[]
     mi_F1s=[]
@@ -284,7 +288,7 @@ def run_model_DBLP(trial=None):
         if args.net=='myGAT':
             net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, args.hidden_dim, num_classes, args.num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
         elif args.net=='changedGAT':
-            net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer)
+            net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
         print(net)  if args.verbose=="True" else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
@@ -299,14 +303,25 @@ def run_model_DBLP(trial=None):
         os.mkdir(ckp_dname)
         ckp_fname=os.path.join(ckp_dname,'checkpoint_{}_{}_re_{}_feat_{}_heads_{}_{}.pt'.format(args.dataset, args.num_layers,re,args.feats_type,args.num_heads,net.__class__.__name__))
         early_stopping = EarlyStopping(patience=args.patience, verbose=False, save_path=ckp_fname)
+        #ntypes=None   #N*num_ntype
         for epoch in range(args.epoch):
             t_0_start = time.time()
             # training
             net.train()
 
-            logits = net(features_list, e_feat)
+            logits,hidden_logits = net(features_list, e_feat)
             logp = F.log_softmax(logits, 1)
             train_loss = F.nll_loss(logp[train_idx], labels[train_idx])
+
+
+
+            #autoencoder for ntype
+            if ae_layer!="None":
+                ntype_idx=torch.randperm(hidden_logits.shape[0])[:int(hidden_logits.shape[0]*ae_sampling_factor)].to(device)
+
+                logp_ntype = F.log_softmax(hidden_logits, 1)
+                ntype_acc=(logp_ntype[ntype_idx].argmax(1)==ntypes[ntype_idx]).float().mean()
+                train_loss+=F.nll_loss(logp_ntype[ntype_idx], ntypes[ntype_idx])
 
             # autograd
             optimizer.zero_grad()
@@ -322,13 +337,13 @@ def run_model_DBLP(trial=None):
             # validation
             net.eval()
             with torch.no_grad():
-                logits = net(features_list, e_feat)
+                logits,_ = net(features_list, e_feat)
                 logp = F.log_softmax(logits, 1)
                 val_loss = F.nll_loss(logp[val_idx], labels[val_idx])
             t_1_end = time.time()
             # print validation info
-            print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f}'.format(
-                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start)) if args.verbose=="True" else None
+            print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} ntype acc: {:.4f}'.format(
+                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     ntype_acc      )      ) if args.verbose=="True" else None
             # early stopping
             early_stopping(val_loss, net)
             if early_stopping.early_stop:
@@ -339,7 +354,7 @@ def run_model_DBLP(trial=None):
         net.load_state_dict(torch.load(ckp_fname))
         net.eval()
         with torch.no_grad():
-            logits = net(features_list, e_feat)
+            logits,_ = net(features_list, e_feat)
             val_logits = logits[val_idx]
             pred = val_logits.argmax(axis=1)
             val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
@@ -362,7 +377,7 @@ def run_model_DBLP(trial=None):
         net.eval()
         test_logits = []
         with torch.no_grad():
-            logits = net(features_list, e_feat)
+            logits,_ = net(features_list, e_feat)
             test_logits = logits[test_idx]
             pred = test_logits.cpu().numpy().argmax(axis=1)
             onehot = np.eye(num_classes, dtype=np.int32)
@@ -383,14 +398,12 @@ def run_model_DBLP(trial=None):
     fn=os.path.join("log",args.study_name)
     if os.path.exists(fn):
         with open(fn,"a") as f:
-            f.write(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}\n")
-            f.write(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
+            f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
             f.write(str(exp_info)+"\n")
             f.write(str(net)+"\n")
     else:
         with open(fn,"w") as f:
-            f.write(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}\n")
-            f.write(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
+            f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
             f.write(str(exp_info)+"\n")
             f.write(str(net)+"\n")
 
