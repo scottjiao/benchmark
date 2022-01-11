@@ -342,7 +342,8 @@ def run_model_DBLP(trial=None):
                 val_loss = F.nll_loss(logp[val_idx], labels[val_idx])
             t_1_end = time.time()
             # print validation info
-            print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} ntype acc: {:.4f}'.format(
+            if epoch%5==0:
+                print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} ntype acc: {:.4f}'.format(
                 epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     ntype_acc      )      ) if args.verbose=="True" else None
             # early stopping
             early_stopping(val_loss, net)
