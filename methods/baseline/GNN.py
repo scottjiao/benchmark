@@ -8,6 +8,36 @@ import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax, GATConv
 from conv import myGATConv,HCGNNConv,changedGATConv
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class NTYPE_ENCODER(nn.Module):
+    def __init__(self,in_dim,hidden_dim,out_dim,dropout):
+        super(NTYPE_ENCODER,self).__init__()
+        self.lc_ae=nn.ModuleList([nn.Linear(in_dim,hidden_dim, bias=True),nn.Linear(hidden_dim,out_dim, bias=True)])
+        self.ae_drop=nn.Dropout(dropout)
+    def forward(self,h):
+        for i in range(len(self.lc_ae)):
+            h=self.lc_ae[i](h)
+            if i==0:
+                h=self.ae_drop(h)
+                h=F.relu(h)
+            hidden_logits=h
+        return hidden_logits
         
 class changedGAT(nn.Module):
     def __init__(self,
@@ -38,9 +68,9 @@ class changedGAT(nn.Module):
         self.activation = activation
         self.fc_list = nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
         self.ae_layer=ae_layer
-        self.ae_drop=nn.Dropout(feat_drop)
-        if ae_layer=="last_hidden":
-            self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
+        #self.ae_drop=nn.Dropout(feat_drop)
+        #if ae_layer=="last_hidden":
+            #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
         for fc in self.fc_list:
             nn.init.xavier_normal_(fc.weight, gain=1.414)
         # input projection (no residual)
@@ -70,23 +100,20 @@ class changedGAT(nn.Module):
         for l in range(self.num_layers):
             h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)
             h = h.flatten(1)
-            if self.ae_layer=="last_hidden":
-                _h=h
-                for i in range(len(self.lc_ae)):
-                    _h=self.lc_ae[i](_h)
-                    if i==0:
-                        _h=self.ae_drop(_h)
-                        _h=F.relu(_h)
-                hidden_logits=_h
+            #if self.ae_layer=="last_hidden":
+            encoded_embeddings=h
+            """for i in range(len(self.lc_ae)):
+                _h=self.lc_ae[i](_h)
+                if i==0:
+                    _h=self.ae_drop(_h)
+                    _h=F.relu(_h)
+            hidden_logits=_h"""
         # output projection
         logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
-        return logits,hidden_logits
-
-
-
+        return logits, encoded_embeddings    #hidden_logits
 
 
 
@@ -144,12 +171,13 @@ class myGAT(nn.Module):
         for l in range(self.num_layers):
             h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)
             h = h.flatten(1)
+            encoded_embeddings=h
         # output projection
         logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
-        return logits
+        return logits,encoded_embeddings
 
 class RGAT(nn.Module):
     def __init__(self,
@@ -256,16 +284,17 @@ class GAT(nn.Module):
             num_hidden * heads[-2], num_classes, heads[-1],
             feat_drop, attn_drop, negative_slope, residual, None))
 
-    def forward(self, features_list):
+    def forward(self, features_list, e_feat):
         h = []
         for fc, feature in zip(self.fc_list, features_list):
             h.append(fc(feature))
         h = torch.cat(h, 0)
         for l in range(self.num_layers):
             h = self.gat_layers[l](self.g, h).flatten(1)
+            encoded_embeddings=h
         # output projection
         logits = self.gat_layers[-1](self.g, h).mean(1)
-        return logits
+        return logits,encoded_embeddings
 
 
 class GCN(nn.Module):
@@ -292,15 +321,16 @@ class GCN(nn.Module):
         self.layers.append(GraphConv(num_hidden, num_classes))
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, features_list):
+    def forward(self, features_list, e_feat):
         h = []
         for fc, feature in zip(self.fc_list, features_list):
             h.append(fc(feature))
         h = torch.cat(h, 0)
         for i, layer in enumerate(self.layers):
+            encoded_embeddings=h
             h = self.dropout(h)
             h = layer(self.g, h)
-        return h
+        return h,encoded_embeddings
 
 
 
