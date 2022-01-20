@@ -8,16 +8,298 @@ import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax, GATConv
 from conv import myGATConv,HCGNNConv,changedGATConv
 
+from dgl._ffi.base import DGLError
+
+
+
+
+class attGTN(nn.Module):
+    def __init__(self,
+                    g,
+                    num_etypes,
+                    in_dims,
+                    num_hidden,
+                    num_classes,
+                    num_convs,
+                    heads,
+                    activation,
+                    dropout,
+                    residual
+                    ):
+        super(attGTN,self).__init__()
+        
+        self.g=g
+        self.num_etypes=num_etypes
+        self.in_dims=in_dims
+        self.num_hidden=num_hidden
+        self.num_classes=num_classes
+        self.num_convs=num_convs
+        self.heads=heads
+        self.activation=activation
+        self.dropout=nn.Dropout(dropout)
+        self.edgedrop=nn.Dropout(dropout)
+        #self.fc1_list=nn.Linear(in_dims,num_hidden,bias=True)
+        self.fc1_list=nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
+        self.fc2=nn.Linear(num_hidden*heads,num_hidden,bias=True)
+        self.fc3=nn.Linear(num_hidden,num_classes,bias=True)
+        self.residual=residual
+        self.convs=[]
+        dim=num_hidden
+        for _ in range(heads):
+            self.convs.append(nn.Sequential (   *[  attGTNConv(dim,g,self.edgedrop) for _ in range(num_convs)     ]))
+        
+        self.convs=nn.ModuleList(self.convs)
+        self.count=0
+        
+
+    def forward(self,features_list, e_feat):
+        
+        h = []
+        for fc, feature in zip(self.fc1_list, features_list):
+            h.append(fc(feature))   # the id is decided by the node types
+        h = torch.cat(h, 0) #num_nodes*hidden
+
+
+        #h=self.fc1(h)
+        z=[]
+        for convs_head in self.convs:
+            #ones=torch.ones([h.shape[0],1]).to(h.device)
+            #deg=convs_head(ones)
+            #norm=torch.pow(deg,-1)
+            #norm[norm == float("Inf")] = 0
+            #z.append(norm*convs_head(h))
+            if self.residual=="True":
+                z.append(h+convs_head(h))
+            else:
+                z.append(convs_head(h))
+
+        z=torch.cat(z,1)
+        z=F.relu(self.dropout(z))
+        z=self.fc2(z)
+        encoded_embeddings=z      #
+        z=F.relu(self.dropout(z))
+        z=self.fc3(z)
+        logits=z                  #
+
+        """if self.count%100==0:
+            for i,convs_head in enumerate(self.convs):
+                print(f"channel {i}") if i==0 else None
+                for j,mod in enumerate(convs_head):
+                    print(f"\tlayer {j} "+str(mod.filter.cpu().tolist())) if i==0 else None"""
+
+
+        self.count+=1
+
+        return logits, encoded_embeddings    #hidden_logits
+
+class attGTNConv(nn.Module):
+    def __init__(self,
+                dim,
+                g,
+                dropout,
+                    allow_zero_in_degree = False):
+        super(attGTNConv,self).__init__()
+        self.g=g
+        #g.edge_type_indexer
+        self.edgedrop=dropout
+        self.al=nn.Parameter(torch.Tensor( 1,dim ) )
+        self.ar=nn.Parameter(torch.Tensor( 1,dim ) )
+        self._allow_zero_in_degree = allow_zero_in_degree
+        negative_slope=0.2;self.leaky_relu = nn.LeakyReLU(negative_slope)
+        #self.w=nn.Parameter(torch.Tensor( 1,num_etypes ) )
+        self.reset_parameters()
+
+
+    def reset_parameters(self):
+        gain = nn.init.calculate_gain('relu')
+        nn.init.xavier_normal_(self.ar, gain=gain)
+        nn.init.xavier_normal_(self.al, gain=gain)
+    def set_allow_zero_in_degree(self, set_value):
+        self._allow_zero_in_degree = set_value
+
+    def forward(self,h):
+        #w=self.w.to(h.device)
+        #w=self.w
+        graph=self.g
+        with graph.local_scope():
+            node_idx_by_ntype=graph.node_idx_by_ntype
+            if not self._allow_zero_in_degree:
+                if (graph.in_degrees() == 0).any():
+                    raise DGLError('There are 0-in-degree nodes in the graph, '
+                                   'output for those nodes will be invalid. '
+                                   'This is harmful for some applications, '
+                                   'causing silent performance regression. '
+                                   'Adding self-loop on the input graph by '
+                                   'calling `g = dgl.add_self_loop(g)` will resolve '
+                                   'the issue. Setting ``allow_zero_in_degree`` '
+                                   'to be `True` when constructing this module will '
+                                   'suppress the check and let the code run.')
+            #self.filter = F.softmax(w, dim=1)
+            #ew=(self.g.edge_type_indexer*self.filter).sum(1).unsqueeze(-1)
+
+            #normalization
+            """graph.srcdata.update({'ones': torch.ones([h.shape[0],1]).to(h.device)})
+            graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ones', 'ew', 'm'),
+                             fn.sum('m', 'deg'))
+            deg = graph.dstdata['deg']
+            norm=torch.pow(deg,-1)
+            norm[norm == float("Inf")] = 0"""
+
+            #propagate
+
+            al_s=self.al*h.sum(-1).unsqueeze(-1)
+            ar_s=self.ar*h.sum(-1).unsqueeze(-1)
+            graph.srcdata.update({'al': al_s,'ar':ar_s})
+            graph.apply_edges(fn.u_add_v('al', 'ar', 'a'))
+            a = self.leaky_relu(graph.edata.pop('a')    )
+            # compute softmax
+            #graph.edata['a'] = self.edgedrop(edge_softmax(graph, a))
+            graph.edata['a'] = self.edgedrop(edge_softmax(graph, a))
+
+            graph.srcdata.update({'ft': h})
+            #graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
+                             fn.sum('m', 'ft'))
+            rst = graph.dstdata['ft']
+        
+
+        return rst
 
 
 
 
 
+class GTN(nn.Module):
+    def __init__(self,
+                    g,
+                    num_etypes,
+                    in_dims,
+                    num_hidden,
+                    num_classes,
+                    num_convs,
+                    heads,
+                    activation,
+                    dropout
+                    ):
+        super(GTN,self).__init__()
+        
+        self.g=g
+        self.num_etypes=num_etypes
+        self.in_dims=in_dims
+        self.num_hidden=num_hidden
+        self.num_classes=num_classes
+        self.num_convs=num_convs
+        self.heads=heads
+        self.activation=activation
+        self.dropout=nn.Dropout(dropout)
+        #self.fc1_list=nn.Linear(in_dims,num_hidden,bias=True)
+        self.fc1_list=nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
+        self.fc2=nn.Linear(num_hidden*heads,num_hidden,bias=True)
+        self.fc3=nn.Linear(num_hidden,num_classes,bias=True)
+        self.convs=[]
+        for _ in range(heads):
+            self.convs.append(nn.Sequential (   *[  GTNConv(num_etypes,g) for _ in range(num_convs)     ]))
+        
+        self.convs=nn.ModuleList(self.convs)
+        self.count=0
+        
+
+    def forward(self,features_list, e_feat):
+        
+        h = []
+        for fc, feature in zip(self.fc1_list, features_list):
+            h.append(fc(feature))   # the id is decided by the node types
+        h = torch.cat(h, 0)
 
 
 
+        #h=self.fc1(h)
+        z=[]
+        for convs_head in self.convs:
+            ones=torch.ones([h.shape[0],1]).to(h.device)
+            deg=convs_head(ones)
+            norm=torch.pow(deg,-1)
+            norm[norm == float("Inf")] = 0
+            z.append(norm*convs_head(h))
+        z=torch.cat(z,1)
+        z=F.relu(self.dropout(z))
+        z=self.fc2(z)
+        encoded_embeddings=z      #
+        z=F.relu(self.dropout(z))
+        z=self.fc3(z)
+        logits=z                  #
+
+        """if self.count%100==0:
+            for i,convs_head in enumerate(self.convs):
+                print(f"channel {i}") if i==0 else None
+                for j,mod in enumerate(convs_head):
+                    print(f"\tlayer {j} "+str(mod.filter.cpu().tolist())) if i==0 else None"""
 
 
+        self.count+=1
+
+        return logits, encoded_embeddings    #hidden_logits
+
+
+class GTNConv(nn.Module):
+    def __init__(self,
+                num_etypes,
+                g,
+                    allow_zero_in_degree = False):
+        super(GTNConv,self).__init__()
+        self.g=g
+        g.edge_type_indexer
+
+        self._allow_zero_in_degree = allow_zero_in_degree
+        self.w=nn.Parameter(torch.Tensor( 1,num_etypes ) )
+        self.reset_parameters()
+
+
+    def reset_parameters(self):
+        nn.init.normal_(self.w, std=0.01)
+    def set_allow_zero_in_degree(self, set_value):
+        self._allow_zero_in_degree = set_value
+
+    def forward(self,h):
+        #w=self.w.to(h.device)
+        w=self.w
+        graph=self.g
+        with graph.local_scope():
+            node_idx_by_ntype=graph.node_idx_by_ntype
+            if not self._allow_zero_in_degree:
+                if (graph.in_degrees() == 0).any():
+                    raise DGLError('There are 0-in-degree nodes in the graph, '
+                                   'output for those nodes will be invalid. '
+                                   'This is harmful for some applications, '
+                                   'causing silent performance regression. '
+                                   'Adding self-loop on the input graph by '
+                                   'calling `g = dgl.add_self_loop(g)` will resolve '
+                                   'the issue. Setting ``allow_zero_in_degree`` '
+                                   'to be `True` when constructing this module will '
+                                   'suppress the check and let the code run.')
+            self.filter = F.softmax(w, dim=1)
+            ew=(self.g.edge_type_indexer*self.filter).sum(1).unsqueeze(-1)
+
+            #normalization
+            """graph.srcdata.update({'ones': torch.ones([h.shape[0],1]).to(h.device)})
+            graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ones', 'ew', 'm'),
+                             fn.sum('m', 'deg'))
+            deg = graph.dstdata['deg']
+            norm=torch.pow(deg,-1)
+            norm[norm == float("Inf")] = 0"""
+
+            #propagate
+
+            graph.srcdata.update({'ft': h})
+            graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ft', 'ew', 'm'),
+                             fn.sum('m', 'ft'))
+            rst = graph.dstdata['ft']
+        
+
+        return rst
 
 
 

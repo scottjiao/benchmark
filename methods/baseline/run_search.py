@@ -12,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER
+from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -43,6 +43,7 @@ ap.add_argument('--lr', type=float, default=5e-4)
 ap.add_argument('--dropout', type=float, default=0.5)
 ap.add_argument('--weight-decay', type=float, default=1e-4)
 ap.add_argument('--slope', type=float, default=0.05)
+ap.add_argument('--residual', type=str, default="True")
 ap.add_argument('--dataset', type=str)
 ap.add_argument('--edge-feats', type=int, default=64)
 ap.add_argument('--run', type=int, default=1)
@@ -60,6 +61,19 @@ ap.add_argument('--etype_specified_attention', type=str, default="False")
 ap.add_argument('--verbose', type=str, default="False")
 ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
 ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
+
+
+ap.add_argument('--search_num_heads', type=str, default="[8]")
+ap.add_argument('--search_lr', type=str, default="[1e-3,5e-4,1e-4]")
+ap.add_argument('--search_weight_decay', type=str, default="[5e-4,1e-4,1e-5]")
+ap.add_argument('--search_hidden_dim', type=str, default="[64,128]")
+ap.add_argument('--search_num_layers', type=str, default="[2]")
+ap.add_argument('--search_lr_times_on_filter_GTN', type=str, default="[100]")
+
+
+
+
+
 args = ap.parse_args()
 
 
@@ -96,6 +110,24 @@ torch.manual_seed(1234)
 
 def run_model_DBLP(trial=None):
     #data preparation
+
+    
+    
+    
+    
+    
+
+    """num_heads=trial.suggest_categorical("num_heads", [8])
+    lr=trial.suggest_categorical("lr", [1e-3,5e-4,1e-4])
+    weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
+    hidden_dim=trial.suggest_categorical("hidden_dim", [64,128])
+    num_layers=trial.suggest_categorical("num_layers", [2])"""
+    num_heads=trial.suggest_categorical("num_heads", eval(args.search_num_heads))
+    lr=trial.suggest_categorical("lr", eval(args.search_lr))
+    weight_decay=trial.suggest_categorical("weight_decay", eval(args.search_weight_decay))
+    hidden_dim=trial.suggest_categorical("hidden_dim", eval(args.search_hidden_dim))
+    num_layers=trial.suggest_categorical("num_layers", eval(args.search_num_layers))
+    lr_times_on_filter_GTN=trial.suggest_categorical("lr_times_on_filter_GTN", eval(args.search_lr_times_on_filter_GTN))
     if True:
         feats_type = args.feats_type
         com_dim=args.com_dim
@@ -107,11 +139,7 @@ def run_model_DBLP(trial=None):
         weight_decay=args.weight_decay
         hidden_dim=args.hidden_dim
         num_layers=args.num_layers"""
-        num_heads=trial.suggest_categorical("num_heads", [8])
-        lr=trial.suggest_categorical("lr", [1e-3,5e-4,1e-4])
-        weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
-        hidden_dim=trial.suggest_categorical("hidden_dim", [64,128])
-        num_layers=trial.suggest_categorical("num_layers", [2])
+        
         ae_layer=args.ae_layer
         ae_sampling_factor=args.ae_sampling_factor
 
@@ -279,11 +307,23 @@ def run_model_DBLP(trial=None):
 
 
     ntype_acc=0
-
+    collector={}
     ma_F1s=[]
     mi_F1s=[]
     val_accs=[]
     for re in range(args.repeat):
+
+
+        #re-id the train-validation in each repeat
+        tr_len,val_len=len(train_idx),len(val_idx)
+        total_idx=np.concatenate([train_idx,val_idx])
+        total_idx=np.random.permutation(total_idx)
+        train_idx,val_idx=total_idx[0:tr_len],total_idx[tr_len:tr_len+val_len]
+
+
+
+
+
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
         heads = [num_heads] * num_layers + [1]
@@ -296,12 +336,32 @@ def run_model_DBLP(trial=None):
             net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
         elif args.net=='GCN':
             net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
+        elif args.net=='GTN':
+            net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
+        elif args.net=='attGTN':
+            net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+
+            
         print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
-        print(net)  if args.verbose=="True" else None
+        #print(net)  if args.verbose=="True" else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
-        optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
+        if args.net=='GTN':
+            ad_list=[]
+            other_list=[]
+            for pname, p in net.named_parameters():
+                #print(f"named pn: {pname} p: {p.shape}")
+            
+                if "convs" in pname:
+                    ad_list.append(p)
+                else:
+                    other_list.append(p)
+            optimizer = torch.optim.Adam([{'params':other_list,"lr":lr,"weight_decay":weight_decay},
+                                            {'params':ad_list,"lr":lr_times_on_filter_GTN*lr,"weight_decay":weight_decay},])
+        else:
+            optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
 
+        print(optimizer) if args.verbose=="True" else None
         # training loop
         net.train()
         t=time.localtime()
@@ -413,6 +473,7 @@ def run_model_DBLP(trial=None):
     print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info)
     print(net)
+    print(optimizer) if args.verbose=="True" else None
 
     fn=os.path.join("log",args.study_name)
     if os.path.exists(fn):
@@ -438,6 +499,9 @@ if __name__ == '__main__':
 
     #torch.cuda.set_device(int(args.gpu))
     #device=torch.device(f"cuda:{int(args.gpu)}")
+    if args.study_name=="temp":
+        if os.path.exists("./temp.db"):
+            os.remove("./temp.db")
     print("start search---------------")
     study = optuna.create_study(study_name=args.study_name, storage=args.study_storage,direction="maximize",pruner=optuna.pruners.MedianPruner(),load_if_exists=True)
     study.optimize(run_model_DBLP, n_trials=args.trial_num)
