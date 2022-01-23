@@ -1,5 +1,6 @@
 """Torch modules for graph attention networks(GAT)."""
 # pylint: disable= no-member, arguments-differ, invalid-name
+from shutil import ExecError
 import torch as th
 from torch import nn
 import torch
@@ -29,7 +30,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregate_slots=False,inputhead=False):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -41,6 +42,8 @@ class slotGATConv(nn.Module):
         self.res_n_type_mappings=res_n_type_mappings
         self.etype_specified_attention=etype_specified_attention
         self.eindexer=eindexer
+        self.aggregate_slots=aggregate_slots
+        self.num_ntype=num_ntype
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
                 self._in_src_feats, out_feats * num_heads, bias=False)
@@ -49,18 +52,20 @@ class slotGATConv(nn.Module):
             raise Exception("!!!")
         else:
             if not n_type_mappings:
-                self.fc = nn.Linear(
-                    self._in_src_feats, out_feats * num_heads, bias=False)
-            else:
+                #self.fc = nn.Linear(
+                    #self._in_src_feats, out_feats * num_heads, bias=False)
+                self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+            """else:
                 self.fc =nn.ModuleList([nn.Linear(
                     self._in_src_feats, out_feats * num_heads, bias=False)  for _ in range(num_ntype)] )
+                raise Exception("!!!")"""
         self.fc_e = nn.Linear(edge_feats, edge_feats*num_heads, bias=False)
         if self.etype_specified_attention:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
         else:
-            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
+            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -68,9 +73,12 @@ class slotGATConv(nn.Module):
         if residual:
             if self._in_dst_feats != out_feats:
                 if not self.res_n_type_mappings:
-                    self.res_fc = nn.Linear(
-                        self._in_dst_feats, num_heads * out_feats, bias=False)
+
+                    self.res_fc =nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+                    """self.res_fc = nn.Linear(
+                        self._in_dst_feats, num_heads * out_feats, bias=False)"""
                 else:
+                    raise NotImplementedError()
                     self.res_fc =nn.ModuleList([nn.Linear(
                         self._in_dst_feats, num_heads * out_feats, bias=False)  for _ in range(num_ntype)] )
             else:
@@ -81,20 +89,23 @@ class slotGATConv(nn.Module):
         self.activation = activation
         self.bias = bias
         if bias:
+            raise NotImplementedError()
             if not self.n_type_mappings:
                 self.bias_param = nn.Parameter(th.zeros((1, num_heads, out_feats)))
             else:
                 self.bias_param=nn.ModuleList([ nn.Parameter(th.zeros((1, num_heads, out_feats)))  for _ in range(num_ntype) ])
         self.alpha = alpha
+        self.inputhead=inputhead
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain('relu')
         if hasattr(self, 'fc'):
-            if self.n_type_mappings:
+            nn.init.xavier_normal_(self.fc, gain=gain)
+            """if self.n_type_mappings:
                 for m in self.fc:
                     nn.init.xavier_normal_(m.weight, gain=gain)
             else:
-                nn.init.xavier_normal_(self.fc.weight, gain=gain)
+                nn.init.xavier_normal_(self.fc.weight, gain=gain)"""
         else:
             raise Exception("!!!")
             nn.init.xavier_normal_(self.fc_src.weight, gain=gain)
@@ -109,6 +120,11 @@ class slotGATConv(nn.Module):
                     nn.init.xavier_normal_(m.weight, gain=gain)
             else:
                 nn.init.xavier_normal_(self.res_fc.weight, gain=gain)
+        elif isinstance(self.res_fc, Identity):
+            pass
+        elif isinstance(self.res_fc, nn.Parameter):
+            nn.init.xavier_normal_(self.res_fc, gain=gain)
+
         nn.init.xavier_normal_(self.fc_e.weight, gain=gain)
 
     def set_allow_zero_in_degree(self, set_value):
@@ -139,24 +155,30 @@ class slotGATConv(nn.Module):
                 raise Exception("!!!")
             else:
                 #feature transformation first
-                h_src = h_dst = self.feat_drop(feat)
-
+                h_src = h_dst = self.feat_drop(feat)   #num_nodes*(num_heads*num_ntype*input_dim)
                 if self.n_type_mappings:
+                    raise Exception("!!!")
                     h_new=[]
                     for type_count,idx in enumerate(node_idx_by_ntype):
                         h_new.append(self.fc[type_count](h_src[idx,:]).view(
                         -1, self._num_heads, self._out_feats))
                     feat_src = feat_dst = torch.cat(h_new, 0)
                 else:
-                    feat_src = feat_dst = self.fc(h_src).view(
-                        -1, self._num_heads, self._out_feats)
-
+                    if self.inputhead:
+                        h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
+                    else:
+                        h_src=h_src.view(-1,self._num_heads,self.num_ntype,int(self._in_src_feats/self._num_heads))
+                    h_dst=h_src=h_src.permute(2,0,1,3).flatten(2)  #num_ntype*num_nodes*(in_feat_dim)
+                    #self.fc with num_ntype*(in_feat_dim)*(out_feats * num_heads)
+                    
+                    feat_src = feat_dst = torch.bmm(h_src,self.fc)  #num_ntype*num_nodes*(out_feats * num_heads)
+                    feat_src = feat_dst =feat_src.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                        -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
 
 
                 if graph.is_block:
                     feat_dst = feat_src[:graph.number_of_dst_nodes()]
-
-            
+        
             if self.etype_specified_attention:
                 el = (feat_src.unsqueeze(-1) * self.attn_l).sum(dim=2).unsqueeze(2) #num_nodes*heads*dim*num_etype   1*heads*dim*1   
                 er = (feat_dst.unsqueeze(-1) * self.attn_r).sum(dim=2).unsqueeze(2)
@@ -164,9 +186,6 @@ class slotGATConv(nn.Module):
                 graph.dstdata.update({'er': er})
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))  #  num_edges*heads*1*num_etype
                 e=self.leaky_relu((graph.edata.pop('e')*self.eindexer).sum(-1))
-
-
-
             else:
                 e_feat = self.edge_emb(e_feat)
                 e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)
@@ -190,8 +209,14 @@ class slotGATConv(nn.Module):
             # residual
             if self.res_fc is not None:
                 if not self.res_n_type_mappings:
-                    resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
+                    if self._in_dst_feats != self._out_feats:
+                        resval =torch.bmm(h_src,self.res_fc).permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                        -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                        #resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
+                    else:
+                        resval = self.res_fc(h_src).view(h_dst.shape[0], -1, self._out_feats*self.num_ntype)  #Identity
                 else:
+                    raise NotImplementedError()
                     res_new=[]
                     for type_count,idx in enumerate(node_idx_by_ntype):
                         res_new.append(self.res_fc[type_count](h_dst[idx,:]).view(

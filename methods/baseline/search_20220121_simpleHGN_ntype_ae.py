@@ -15,7 +15,7 @@ class Run( multiprocessing.Process):
 
 dataset_to_evaluate=[("DBLP_GTN",1,20),("ACM_GTN",1,20),("IMDB_GTN",1,20),("pubmed_HNE_complete",1,30)]
 fixed_info={"ae_layer":"True"}
-task_to_evaluate=[{"net":"GCN","ae_sampling_factor":"0.01"},{"net":"GCN","ae_sampling_factor":"0.05"},{"net":"GCN","ae_sampling_factor":"0.001"},]
+task_to_evaluate=[{"net":"changedGAT","ae_sampling_factor":"0.01"},{"net":"changedGAT","ae_sampling_factor":"0.05"},{"net":"changedGAT","ae_sampling_factor":"0.001"},]
 gpus=["0"]
 total_trial_num=1
 

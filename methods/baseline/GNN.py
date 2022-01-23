@@ -40,6 +40,8 @@ class slotGAT(nn.Module):
         self.activation = activation
         self.fc_list = nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
         self.ae_layer=ae_layer
+        self.num_ntype=num_ntype
+        self.num_classes=num_classes
         #self.ae_drop=nn.Dropout(feat_drop)
         #if ae_layer=="last_hidden":
             #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
@@ -48,40 +50,40 @@ class slotGAT(nn.Module):
         # input projection (no residual)
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
             num_hidden, num_hidden, heads[0],
-            feat_drop, attn_drop, negative_slope, False, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer))
+            feat_drop, attn_drop, negative_slope, False, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,inputhead=True))
         # hidden layers
         for l in range(1, num_layers):
             # due to multi-head, the in_dim = num_hidden * num_heads
             self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
-                num_hidden * heads[l-1], num_hidden, heads[l],
+                num_hidden* heads[l-1] , num_hidden, heads[l],
                 feat_drop, attn_drop, negative_slope, residual, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer))
         # output projection
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
-            num_hidden * heads[-2], num_classes, heads[-1],
-            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer))
+            num_hidden* heads[-2] , num_classes, heads[-1],
+            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregate_slots=True))
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
     def forward(self, features_list, e_feat):
 
         encoded_embeddings=None
         h = []
-        for fc, feature in zip(self.fc_list, features_list):
-            h.append(fc(feature))   # the id is decided by the node types
-        h = torch.cat(h, 0)
+        for nt_id,(fc, feature) in enumerate(zip(self.fc_list, features_list)):
+            nt_ft=fc(feature)
+            emsen_ft=torch.zeros([nt_ft.shape[0],nt_ft.shape[1]*self.num_ntype]).to(feature.device)
+            emsen_ft[:,nt_ft.shape[1]*nt_id:nt_ft.shape[1]*(nt_id+1)]=nt_ft
+            h.append(emsen_ft)   # the id is decided by the node types
+        h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
         res_attn = None
         for l in range(self.num_layers):
-            h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)
-            h = h.flatten(1)
+            h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)   #num_nodes*num_heads*(num_ntype*hidden_dim)
+            h = h.flatten(1)#num_nodes*(num_heads*num_ntype*hidden_dim)
             #if self.ae_layer=="last_hidden":
             encoded_embeddings=h
-            """for i in range(len(self.lc_ae)):
-                _h=self.lc_ae[i](_h)
-                if i==0:
-                    _h=self.ae_drop(_h)
-                    _h=F.relu(_h)
-            hidden_logits=_h"""
         # output projection
-        logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)
+        logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
+        #average across the ntype info
+        logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+        #average across the heads
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
