@@ -12,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT
+from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -32,36 +32,37 @@ ap.add_argument('--feats-type', type=int, default=3,
                         '3 - all id vec. Default is 2;' +
                     '4 - only term features (id vec for others);' + 
                     '5 - only term features (zero vec for others).')
-ap.add_argument('--hidden-dim', type=int, default=64, help='Dimension of the node hidden state. Default is 64.')
+#ap.add_argument('--hidden-dim', type=int, default=64, help='Dimension of the node hidden state. Default is 64.')
 ap.add_argument('--com_dim', type=int, default=64 )
 ap.add_argument('--num-heads', type=int, default=8, help='Number of the attention heads. Default is 8.')
 ap.add_argument('--epoch', type=int, default=300, help='Number of epochs.')
 ap.add_argument('--patience', type=int, default=30, help='Patience.')
 ap.add_argument('--repeat', type=int, default=30, help='Repeat the training and testing for N times. Default is 1.')
-ap.add_argument('--num-layers', type=int, default=2)
-ap.add_argument('--lr', type=float, default=5e-4)
+#ap.add_argument('--num-layers', type=int, default=2)
+#ap.add_argument('--lr', type=float, default=5e-4)
 ap.add_argument('--dropout', type=float, default=0.5)
-ap.add_argument('--weight-decay', type=float, default=1e-4)
+#ap.add_argument('--weight-decay', type=float, default=1e-4)
 ap.add_argument('--slope', type=float, default=0.05)
 ap.add_argument('--residual', type=str, default="True")
 ap.add_argument('--dataset', type=str)
 ap.add_argument('--edge-feats', type=int, default=64)
 ap.add_argument('--run', type=int, default=1)
 ap.add_argument('--gpu', type=str, default="0")
-ap.add_argument('--hiddens', type=str, default="64_32")
+#ap.add_argument('--hiddens', type=str, default="64_32")
 ap.add_argument('--activation', type=str, default="elu")
 ap.add_argument('--bias', type=str, default="true")
 ap.add_argument('--net', type=str, default="myGAT")
 ap.add_argument('--n_type_mappings', type=str, default="False")
 ap.add_argument('--res_n_type_mappings', type=str, default="False")
 ap.add_argument('--study_name', type=str, default="temp")
-ap.add_argument('--study_storage', type=str, default="sqlite:///temp.db")
+ap.add_argument('--study_storage', type=str, default="sqlite:///db/temp.db")
 ap.add_argument('--trial_num', type=int, default=50)
 ap.add_argument('--etype_specified_attention', type=str, default="False")
 ap.add_argument('--verbose', type=str, default="False")
 ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
 ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
-
+ap.add_argument('--slot_aggregator', type=str, default="average")
+ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 
 ap.add_argument('--search_num_heads', type=str, default="[8]")
 ap.add_argument('--search_lr', type=str, default="[1e-3,5e-4,1e-4]")
@@ -70,7 +71,7 @@ ap.add_argument('--search_hidden_dim', type=str, default="[64,128]")
 ap.add_argument('--search_num_layers', type=str, default="[2]")
 ap.add_argument('--search_lr_times_on_filter_GTN', type=str, default="[100]")
 
-
+torch.set_num_threads(4)
 
 
 
@@ -133,7 +134,8 @@ def run_model_DBLP(trial=None):
         com_dim=args.com_dim
         L2_norm=True
 
-
+        slot_aggregator=args.slot_aggregator
+        slot_trans=args.slot_trans
         """num_heads=args.num_heads
         lr=args.lr
         weight_decay=args.weight_decay
@@ -151,7 +153,7 @@ def run_model_DBLP(trial=None):
 
 
         #num_heads=1
-        hiddens=[int(i) for i in args.hiddens.split("_")]
+        #hiddens=[int(i) for i in args.hiddens.split("_")]
         features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
         exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                     f"\n\tedge num: {adjM.nnz}"+\
@@ -305,7 +307,7 @@ def run_model_DBLP(trial=None):
 
 
 
-
+    ntype_indexer=g.node_ntype_indexer
     ntype_acc=0
     collector={}
     ma_F1s=[]
@@ -333,19 +335,23 @@ def run_model_DBLP(trial=None):
         elif args.net=='changedGAT':
             net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         elif args.net=='slotGAT':
-            net = slotGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
+            net = slotGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,slot_trans=slot_trans)
         elif args.net=='GAT':
             net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
         elif args.net=='GCN':
             net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
+        elif args.net=="slotGCN":
+            net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer)
         elif args.net=='GTN':
             net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
         elif args.net=='attGTN':
             net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+        else:
+            raise NotImplementedError()
 
             
         print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
-        #print(net)  if args.verbose=="True" else None
+        print(net)  if args.verbose=="True" else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
         if args.net=='GTN':
@@ -370,7 +376,7 @@ def run_model_DBLP(trial=None):
         str_t=f"{t.tm_year:0>4d}{t.tm_mon:0>2d}{t.tm_hour:0>2d}{t.tm_min:0>2d}{t.tm_sec:0>2d}{int(time.time()*1000)%1000}"
         ckp_dname=os.path.join('checkpoint',str_t)
         os.mkdir(ckp_dname)
-        ckp_fname=os.path.join(ckp_dname,'checkpoint_{}_{}_re_{}_feat_{}_heads_{}_{}.pt'.format(args.dataset, args.num_layers,re,args.feats_type,args.num_heads,net.__class__.__name__))
+        ckp_fname=os.path.join(ckp_dname,'checkpoint_{}_{}_re_{}_feat_{}_heads_{}_{}.pt'.format(args.dataset, num_layers,re,args.feats_type,num_heads,net.__class__.__name__))
         early_stopping = EarlyStopping(patience=args.patience, verbose=False, save_path=ckp_fname)
 
         
@@ -474,20 +480,27 @@ def run_model_DBLP(trial=None):
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}")
     print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info)
-    print(net)
+    #print(net) if args.verbose=="True" else None
+    print(f"trial.params: {str(trial.params)}")
     print(optimizer) if args.verbose=="True" else None
 
     fn=os.path.join("log",args.study_name)
     if os.path.exists(fn):
-        with open(fn,"a") as f:
-            f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
-            f.write(str(exp_info)+"\n")
-            f.write(str(net)+"\n")
+        m="a"
     else:
+        m="w"
+    
+    with open(fn,m) as f:
+        f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
+        f.write(str(exp_info)+"\n")
+        f.write(f"trial.params: {str(trial.params)}"+"\n")
+        #f.write(str(net)+"\n")
+    """ else:
         with open(fn,"w") as f:
             f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
             f.write(str(exp_info)+"\n")
-            f.write(str(net)+"\n")
+            f.write(f"trial.params: {str(trial.params)}"+"\n")
+            #f.write(str(net)+"\n")"""
 
     return score
 

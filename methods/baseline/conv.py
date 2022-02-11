@@ -11,6 +11,180 @@ from dgl.nn.pytorch.utils import Identity
 from dgl.utils import expand_as_pair
 
 
+# pylint: disable=W0235
+class slotGCNConv(nn.Module):
+    
+    def __init__(self,
+                 in_feats,
+                 out_feats,
+                 norm='both',
+                 weight=True,
+                 bias=True,
+                 activation=None,
+                 allow_zero_in_degree=False,num_ntype=None,aggregator=None,slot_trans=None,ntype_indexer=None):
+        super(slotGCNConv, self).__init__()
+        if norm not in ('none', 'both', 'right', 'left'):
+            raise DGLError('Invalid norm value. Must be either "none", "both", "right" or "left".'
+                           ' But got "{}".'.format(norm))
+        self._in_feats = in_feats
+        self._out_feats = out_feats
+        self._norm = norm
+        self._allow_zero_in_degree = allow_zero_in_degree
+        self.num_ntype=num_ntype
+        self.aggregator=aggregator
+        self.slot_trans=slot_trans
+        self.ntype_indexer=ntype_indexer
+        if slot_trans=="one":
+            assert self.aggregator in ["last_fc",None]
+
+        if weight:
+            if self.aggregator=="last_fc":
+                self.weight = nn.Parameter(th.Tensor(self.num_ntype*in_feats, out_feats))
+            else:
+                self.weight = nn.Parameter(th.Tensor(self.num_ntype,in_feats, out_feats))
+        else:
+            self.register_parameter('weight', None)
+
+        if bias:
+            if self.aggregator=="last_fc":
+                self.bias = nn.Parameter(th.Tensor(out_feats))
+            else:
+                self.bias = nn.Parameter(th.Tensor(self.num_ntype*out_feats))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+        self._activation = activation
+
+    def reset_parameters(self):
+        
+        if self.weight is not None:
+            nn.init.xavier_uniform_(self.weight)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def set_allow_zero_in_degree(self, set_value):
+        r"""
+
+        Description
+        -----------
+        Set allow_zero_in_degree flag.
+
+        Parameters
+        ----------
+        set_value : bool
+            The value to be set to the flag.
+        """
+        self._allow_zero_in_degree = set_value
+
+    def forward(self, graph, feat, weight=None, edge_weight=None):
+        with graph.local_scope():
+            if not self._allow_zero_in_degree:
+                if (graph.in_degrees() == 0).any():
+                    raise DGLError('There are 0-in-degree nodes in the graph, '
+                                   'output for those nodes will be invalid. '
+                                   'This is harmful for some applications, '
+                                   'causing silent performance regression. '
+                                   'Adding self-loop on the input graph by '
+                                   'calling `g = dgl.add_self_loop(g)` will resolve '
+                                   'the issue. Setting ``allow_zero_in_degree`` '
+                                   'to be `True` when constructing this module will '
+                                   'suppress the check and let the code run.')
+            aggregate_fn = fn.copy_src('h', 'm')
+            if edge_weight is not None:
+                assert edge_weight.shape[0] == graph.number_of_edges()
+                graph.edata['_edge_weight'] = edge_weight
+                aggregate_fn = fn.u_mul_e('h', '_edge_weight', 'm')
+
+            # (BarclayII) For RGCN on heterogeneous graphs we need to support GCN on bipartite.
+            feat_src, feat_dst = expand_as_pair(feat, graph)
+            if self._norm in ['left', 'both']:
+                degs = graph.out_degrees().float().clamp(min=1)
+                if self._norm == 'both':
+                    norm = th.pow(degs, -0.5)
+                else:
+                    norm = 1.0 / degs
+                shp = norm.shape + (1,) * (feat_src.dim() - 1)
+                norm = th.reshape(norm, shp)
+                feat_src = feat_src * norm
+
+            if weight is not None:
+                if self.weight is not None:
+                    raise DGLError('External weight is provided while at the same time the'
+                                   ' module has defined its own weight parameter. Please'
+                                   ' create the module with flag weight=False.')
+            else:
+                weight = self.weight
+
+            
+            if self._in_feats > self._out_feats:
+                if self.aggregator=="last_fc":
+                    feat_src = th.mm(feat_src, weight)
+                elif self.slot_trans=="one":
+                    ntype_indexer=self.ntype_indexer.permute(1,0)  #需要num_ntypes*num_nodes的0-1 one hot indexer
+                    feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    
+                    if weight is not None:
+                        feat_src = th.bmm(feat_src, weight)*ntype_indexer+feat_src*(1-ntype_indexer)
+                    feat_src=feat_src.permute(1,0,2).flatten(1)
+                else:
+                    ###reshape feat_src
+                    feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    # mult W first to reduce the feature size for aggregation.
+                    if weight is not None:
+                        feat_src = th.bmm(feat_src, weight)
+                    feat_src=feat_src.permute(1,0,2).flatten(1)
+                graph.srcdata['h'] = feat_src
+                graph.update_all(aggregate_fn, fn.sum(msg='m', out='h'))
+                rst = graph.dstdata['h']
+            else:
+                # aggregate first then mult W
+                graph.srcdata['h'] = feat_src
+                graph.update_all(aggregate_fn, fn.sum(msg='m', out='h'))
+                rst = graph.dstdata['h']
+                if self.aggregator=="last_fc":
+                    rst = th.mm(rst, weight)
+                elif self.slot_trans=="one":
+                    ntype_indexer=self.ntype_indexer.permute(1,0).unsqueeze(-1)  #需要num_ntypes*num_nodes的0-1 one hot indexer
+                    rst=rst.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    
+                    if weight is not None:
+                        rst = th.bmm(rst, weight)*ntype_indexer+rst*(1-ntype_indexer)
+                    rst=rst.permute(1,0,2).flatten(1)
+                else:
+                    #######reshape feat_src
+                    rst=rst.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    if weight is not None:
+                        rst = th.bmm(rst, weight)
+                    rst=rst.permute(1,0,2).flatten(1)
+
+            if self._norm in ['right', 'both']:
+                degs = graph.in_degrees().float().clamp(min=1)
+                if self._norm == 'both':
+                    norm = th.pow(degs, -0.5)
+                else:
+                    norm = 1.0 / degs
+                shp = norm.shape + (1,) * (feat_dst.dim() - 1)
+                norm = th.reshape(norm, shp)
+                rst = rst * norm
+
+            if self.bias is not None:
+                rst = rst + self.bias
+
+            if self._activation is not None:
+                rst = self._activation(rst)
+
+            return rst
+
+    def extra_repr(self):
+        summary = 'in={_in_feats}, out={_out_feats}'
+        summary += ', normalization={_norm}'
+        if '_activation' in self.__dict__:
+            summary += ', activation={_activation}'
+        return summary.format(**self.__dict__)
+
+
 class slotGATConv(nn.Module):
     """
     Adapted from
@@ -30,7 +204,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregate_slots=False,inputhead=False):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -42,8 +216,9 @@ class slotGATConv(nn.Module):
         self.res_n_type_mappings=res_n_type_mappings
         self.etype_specified_attention=etype_specified_attention
         self.eindexer=eindexer
-        self.aggregate_slots=aggregate_slots
-        self.num_ntype=num_ntype
+        self.aggregator=aggregator
+        self.num_ntype=num_ntype 
+        
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
                 self._in_src_feats, out_feats * num_heads, bias=False)
@@ -54,7 +229,11 @@ class slotGATConv(nn.Module):
             if not n_type_mappings:
                 #self.fc = nn.Linear(
                     #self._in_src_feats, out_feats * num_heads, bias=False)
-                self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+                if self.aggregator=="last_fc":
+                    self.fc = nn.Parameter(th.FloatTensor(size=(self._in_src_feats*self.num_ntype, out_feats * num_heads))) #num_heads=1 in last layer
+                else:
+
+                    self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
             """else:
                 self.fc =nn.ModuleList([nn.Linear(
                     self._in_src_feats, out_feats * num_heads, bias=False)  for _ in range(num_ntype)] )
@@ -63,6 +242,11 @@ class slotGATConv(nn.Module):
         if self.etype_specified_attention:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
+
+        elif self.aggregator=="last_fc":
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
+            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
+            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
         else:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
@@ -73,8 +257,10 @@ class slotGATConv(nn.Module):
         if residual:
             if self._in_dst_feats != out_feats:
                 if not self.res_n_type_mappings:
-
-                    self.res_fc =nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+                    if self.aggregator=="last_fc":
+                        self.res_fc =nn.Parameter(th.FloatTensor(size=( self._in_src_feats*self.num_ntype, out_feats * num_heads)))#num_heads=1 in last layer
+                    else:
+                        self.res_fc =nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
                     """self.res_fc = nn.Linear(
                         self._in_dst_feats, num_heads * out_feats, bias=False)"""
                 else:
@@ -155,7 +341,7 @@ class slotGATConv(nn.Module):
                 raise Exception("!!!")
             else:
                 #feature transformation first
-                h_src = h_dst = self.feat_drop(feat)   #num_nodes*(num_heads*num_ntype*input_dim)
+                h_src = h_dst = self.feat_drop(feat)   #num_nodes*(num_ntype*input_dim)
                 if self.n_type_mappings:
                     raise Exception("!!!")
                     h_new=[]
@@ -163,6 +349,8 @@ class slotGATConv(nn.Module):
                         h_new.append(self.fc[type_count](h_src[idx,:]).view(
                         -1, self._num_heads, self._out_feats))
                     feat_src = feat_dst = torch.cat(h_new, 0)
+                elif self.aggregator=="last_fc":
+                    feat_src = feat_dst = torch.mm(h_src,self.fc).view(-1,1,self._out_feats)
                 else:
                     if self.inputhead:
                         h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
@@ -210,8 +398,11 @@ class slotGATConv(nn.Module):
             if self.res_fc is not None:
                 if not self.res_n_type_mappings:
                     if self._in_dst_feats != self._out_feats:
-                        resval =torch.bmm(h_src,self.res_fc).permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
-                        -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                        if self.aggregator=="last_fc":
+                            resval =torch.mm(h_src,self.res_fc).view(-1,1,self._out_feats)
+                        else:
+                            resval =torch.bmm(h_src,self.res_fc).permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                            -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
                         #resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
                     else:
                         resval = self.res_fc(h_src).view(h_dst.shape[0], -1, self._out_feats*self.num_ntype)  #Identity

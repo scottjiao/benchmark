@@ -86,7 +86,7 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
 
                         
         study_name=f"ae_data_{dataset}_net_{task['net']}_ae_sampling_factor_{task['ae_sampling_factor']}"
-        study_storage=f"sqlite:///{study_name}.db"
+        study_storage=f"sqlite:///db/{study_name}.db"
         #trial_num=int(total_trial_num/ (len(gpus)*worker_num) )
         trial_num=1
 

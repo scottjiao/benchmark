@@ -6,9 +6,78 @@ from dgl.nn.pytorch import GraphConv
 
 import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax, GATConv
-from conv import myGATConv,HCGNNConv,changedGATConv,slotGATConv
+from conv import myGATConv,HCGNNConv,changedGATConv,slotGATConv,slotGCNConv
 
 from dgl._ffi.base import DGLError
+
+class slotGCN(nn.Module):
+    def __init__(self,
+                 g,
+                 in_dims,
+                 num_hidden,
+                 num_classes,
+                 num_layers,
+                 activation,
+                 dropout,num_ntype,aggregator,slot_trans,ntype_indexer):
+        super(slotGCN, self).__init__()
+        self.g = g
+        self.num_ntype=num_ntype
+        self.aggregator=aggregator
+        self.slot_trans=slot_trans
+        self.num_classes=num_classes
+        self.layers = nn.ModuleList()
+        self.fc_list = nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
+        for fc in self.fc_list:
+            nn.init.xavier_normal_(fc.weight, gain=1.414)
+        # input layer
+        self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation, weight=False,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer))
+        # hidden layers
+        for i in range(num_layers - 1):
+            self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer))
+        # output layer
+        self.layers.append(slotGCNConv(num_hidden, num_classes,num_ntype=self.num_ntype,aggregator=self.aggregator,ntype_indexer=ntype_indexer))
+        negative_slope=0.2
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
+        self.dropout = nn.Dropout(p=dropout)
+        if self.aggregator=="onedimconv":
+            self.nt_aggr=nn.Parameter(torch.FloatTensor(1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
+
+    def forward(self, features_list, e_feat):
+        h = []
+        for nt_id,(fc, feature) in enumerate(zip(self.fc_list, features_list)):
+            nt_ft=fc(feature)
+            emsen_ft=torch.zeros([nt_ft.shape[0],nt_ft.shape[1]*self.num_ntype]).to(feature.device)
+            emsen_ft[:,nt_ft.shape[1]*nt_id:nt_ft.shape[1]*(nt_id+1)]=nt_ft
+            h.append(emsen_ft)   # the id is decided by the node types
+        h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
+
+
+        """h = []
+        for fc, feature in zip(self.fc_list, features_list):
+            h.append(fc(feature))
+        h = torch.cat(h, 0)"""
+        for i, layer in enumerate(self.layers):
+            encoded_embeddings=h
+            h = self.dropout(h)
+            h = layer(self.g, h)
+
+        logits=h
+        if self.aggregator=="average":
+            logits=logits.view(-1,self.num_ntype,self.num_classes).mean(1)
+        elif self.aggregator=="onedimconv":
+            logits=(logits.view(-1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=1)).sum(1)
+        elif self.aggregator=="last_fc":
+            logits=logits
+        else:
+            raise NotImplementedError()
+        h=logits
+
+        return h,encoded_embeddings
+
+
+
+
+
 
        
 class slotGAT(nn.Module):
@@ -32,7 +101,7 @@ class slotGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer):
+                 ae_layer,aggregator="average"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -42,6 +111,7 @@ class slotGAT(nn.Module):
         self.ae_layer=ae_layer
         self.num_ntype=num_ntype
         self.num_classes=num_classes
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
         #self.ae_drop=nn.Dropout(feat_drop)
         #if ae_layer=="last_hidden":
             #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
@@ -60,7 +130,11 @@ class slotGAT(nn.Module):
         # output projection
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
             num_hidden* heads[-2] , num_classes, heads[-1],
-            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregate_slots=True))
+            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregator=aggregator))
+        self.aggregator=aggregator
+        assert aggregator in ["onedimconv","average","last_fc"]
+        if self.aggregator=="onedimconv":
+            self.nt_aggr=nn.Parameter(torch.FloatTensor(1,1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
     def forward(self, features_list, e_feat):
@@ -82,7 +156,14 @@ class slotGAT(nn.Module):
         # output projection
         logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
         #average across the ntype info
-        logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+        if self.aggregator=="average":
+            logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+        elif self.aggregator=="onedimconv":
+            logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
+        elif self.aggregator=="last_fc":
+            logits=logits
+        else:
+            raise NotImplementedError()
         #average across the heads
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
@@ -97,6 +178,7 @@ class attGTN(nn.Module):
                     g,
                     num_etypes,
                     in_dims,
+
                     num_hidden,
                     num_classes,
                     num_convs,
