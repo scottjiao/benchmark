@@ -12,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN
+from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -63,6 +63,7 @@ ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
 ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
 ap.add_argument('--slot_aggregator', type=str, default="average")
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
+ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 
 ap.add_argument('--search_num_heads', type=str, default="[8]")
 ap.add_argument('--search_lr', type=str, default="[1e-3,5e-4,1e-4]")
@@ -76,6 +77,7 @@ torch.set_num_threads(4)
 
 
 args = ap.parse_args()
+
 
 
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
@@ -306,7 +308,7 @@ def run_model_DBLP(trial=None):
 
 
 
-
+    LP_alpha=args.LP_alpha
     ntype_indexer=g.node_ntype_indexer
     ntype_acc=0
     collector={}
@@ -346,6 +348,10 @@ def run_model_DBLP(trial=None):
             net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
         elif args.net=='attGTN':
             net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+        elif args.net=='LabelPropagation':
+            net=LabelPropagation(num_layers, LP_alpha)
+        elif args.net=='MLP':
+            net=MLP(g,in_dims,hidden_dim,num_classes,num_layers,F.relu,args.dropout)
         else:
             raise NotImplementedError()
 
@@ -366,10 +372,12 @@ def run_model_DBLP(trial=None):
                     other_list.append(p)
             optimizer = torch.optim.Adam([{'params':other_list,"lr":lr,"weight_decay":weight_decay},
                                             {'params':ad_list,"lr":lr_times_on_filter_GTN*lr,"weight_decay":weight_decay},])
+        elif args.net=="LabelPropagation":
+            pass
         else:
             optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
 
-        print(optimizer) if args.verbose=="True" else None
+        #print(optimizer) if args.verbose=="True" else None
         # training loop
         net.train()
         t=time.localtime()
@@ -382,15 +390,19 @@ def run_model_DBLP(trial=None):
         
         dec_dic={}
         #ntypes=None   #N*num_ntype
+        
+        
+            
         for epoch in range(args.epoch):
+            if args.net=="LabelPropagation"  :
+                continue
             t_0_start = time.time()
             # training
             net.train()
 
-            logits,encoded_embeddings = net(features_list, e_feat)
+            logits,encoded_embeddings = net(features_list, e_feat) 
             logp = F.log_softmax(logits, 1)
             train_loss = F.nll_loss(logp[train_idx], labels[train_idx])
-            
 
             #autoencoder for ntype
             if ae_layer!="None":
@@ -438,10 +450,11 @@ def run_model_DBLP(trial=None):
                 break
         
         # validation with evaluate_results_nc
-        net.load_state_dict(torch.load(ckp_fname))
+        if args.net!="LabelPropagation":
+            net.load_state_dict(torch.load(ckp_fname))
         net.eval()
         with torch.no_grad():
-            logits,_ = net(features_list, e_feat)
+            logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             val_logits = logits[val_idx]
             pred = val_logits.argmax(axis=1)
             val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
@@ -460,11 +473,12 @@ def run_model_DBLP(trial=None):
 
 
         # testing with evaluate_results_nc
-        net.load_state_dict(torch.load(ckp_fname))
+        if args.net!="LabelPropagation":
+            net.load_state_dict(torch.load(ckp_fname)) 
         net.eval()
         test_logits = []
         with torch.no_grad():
-            logits,_ = net(features_list, e_feat)
+            logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             test_logits = logits[test_idx]
             pred = test_logits.cpu().numpy().argmax(axis=1)
             onehot = np.eye(num_classes, dtype=np.int32)
@@ -476,13 +490,14 @@ def run_model_DBLP(trial=None):
         mi_F1s.append(d["micro-f1"])
         t_re1=time.time();t_re=t_re1-t_re0
         #print(f" this round cost {t_re}(s)")
-        remove_ckp_files(ckp_dname=ckp_dname)
+        if args.net!="LabelPropagation":
+            remove_ckp_files(ckp_dname=ckp_dname)
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}")
     print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info)
     #print(net) if args.verbose=="True" else None
     print(f"trial.params: {str(trial.params)}")
-    print(optimizer) if args.verbose=="True" else None
+    #print(optimizer) if args.verbose=="True" else None
 
     fn=os.path.join("log",args.study_name)
     if os.path.exists(fn):
@@ -515,8 +530,8 @@ if __name__ == '__main__':
     #torch.cuda.set_device(int(args.gpu))
     #device=torch.device(f"cuda:{int(args.gpu)}")
     if args.study_name=="temp":
-        if os.path.exists("./temp.db"):
-            os.remove("./temp.db")
+        if os.path.exists("./db/temp.db"):
+            os.remove("./db/temp.db")
     print("start search---------------")
     study = optuna.create_study(study_name=args.study_name, storage=args.study_storage,direction="maximize",pruner=optuna.pruners.MedianPruner(),load_if_exists=True)
     study.optimize(run_model_DBLP, n_trials=args.trial_num)

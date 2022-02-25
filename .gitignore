@@ -9,3 +9,4 @@ data/
 **plan.txt
 *.pyc
 *.db
+*.png

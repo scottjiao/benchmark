@@ -10,6 +10,99 @@ from conv import myGATConv,HCGNNConv,changedGATConv,slotGATConv,slotGCNConv
 
 from dgl._ffi.base import DGLError
 
+
+
+
+
+class MLP(nn.Module):
+    def __init__(self,
+                 g,
+                 in_dims,
+                 num_hidden,
+                 num_classes,
+                 num_layers,
+                 activation,
+                 dropout):
+        super(MLP, self).__init__()
+        self.num_classes=num_classes
+        self.layers = nn.ModuleList()
+        self.fc_list = nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
+        for fc in self.fc_list:
+            nn.init.xavier_normal_(fc.weight, gain=1.414)
+        # input layer
+        self.layers.append(nn.Linear(num_hidden, num_hidden, bias=True))
+        # hidden layers
+        for i in range(num_layers - 1):
+            self.layers.append(nn.Linear(num_hidden, num_hidden))
+        # output layer
+        self.layers.append(nn.Linear(num_hidden, num_classes))
+        for ly in self.layers:
+            nn.init.xavier_normal_(ly.weight, gain=1.414)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, features_list, e_feat):
+        h = []
+        for fc, feature in zip(self.fc_list, features_list):
+            h.append(fc(feature))
+        h = torch.cat(h, 0)
+
+        for i, layer in enumerate(self.layers):
+            encoded_embeddings=h
+            h = self.dropout(h)
+            h = layer(h)
+            h=F.relu(h) if i<len(self.layers) else h
+
+        return h,encoded_embeddings
+
+
+
+class LabelPropagation(nn.Module):
+    r"""
+    Description
+    -----------
+    Introduced in `Learning from Labeled and Unlabeled Data with Label Propagation <https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.14.3864&rep=rep1&type=pdf>`_
+    .. math::
+        \mathbf{Y}^{\prime} = \alpha \cdot \mathbf{D}^{-1/2} \mathbf{A}
+        \mathbf{D}^{-1/2} \mathbf{Y} + (1 - \alpha) \mathbf{Y},
+    where unlabeled data is inferred by labeled data via propagation.
+    Parameters
+    ----------
+        num_layers: int
+            The number of propagations.
+        alpha: float
+            The :math:`\alpha` coefficient.
+    """
+    def __init__(self, num_layers, alpha):
+        super(LabelPropagation, self).__init__()
+
+        self.num_layers = num_layers
+        self.alpha = alpha
+    
+    @torch.no_grad()
+    def forward(self, g, labels, mask):    # labels.shape=(number of nodes of type 0)  may contain false labels, therefore here the mask argument which provides the training nodes' idx is important
+        with g.local_scope():
+            if labels.dtype == torch.long:
+                labels = F.one_hot(labels.view(-1)).to(torch.float32)
+            y=torch.zeros((g.num_nodes(),labels.shape[1])).to(labels.device)
+            y[mask] = labels[mask]
+            
+            last = (1 - self.alpha) * y
+            degs = g.in_degrees().float().clamp(min=1)
+            norm = torch.pow(degs, -0.5).to(labels.device).unsqueeze(1)
+
+            for _ in range(self.num_layers):
+                # Assume the graphs to be undirected
+                g.ndata['h'] = y * norm
+                g.update_all(fn.copy_u('h', 'm'), fn.sum('m', 'h'))
+                y = last + self.alpha * g.ndata.pop('h') * norm
+                y=F.normalize(y,p=1,dim=1)   #normalize y by row with p-1-norm
+                y[mask] = labels[mask]
+                last = (1 - self.alpha) * y
+            
+            return y,None
+
+
+
 class slotGCN(nn.Module):
     def __init__(self,
                  g,
