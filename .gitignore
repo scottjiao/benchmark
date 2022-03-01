@@ -10,3 +10,5 @@ data/
 *.pyc
 *.db
 *.png
+*.npy
+*records
