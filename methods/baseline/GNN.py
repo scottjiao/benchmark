@@ -14,6 +14,191 @@ from dgl._ffi.base import DGLError
 
 
 
+class slotGTN(nn.Module):
+    def __init__(self,
+                    g,
+                    num_etypes,
+                    in_dims,
+                    num_hidden,
+                    num_classes,
+                    num_convs,
+                    heads,
+                    activation,
+                    dropout,
+                    num_ntype,
+                    normalize,
+                    ntype_indexer
+                    ):
+        super(slotGTN,self).__init__()
+        
+        self.g=g
+        self.num_etypes=num_etypes
+        self.in_dims=in_dims
+        self.num_hidden=num_hidden
+        self.num_classes=num_classes
+        self.num_convs=num_convs
+        self.heads=heads
+        self.activation=activation
+        self.dropout=nn.Dropout(dropout)
+        
+        self.num_ntype=num_ntype
+        #self.fc1_list=nn.Linear(in_dims,num_hidden,bias=True)
+        self.fc1_list=nn.ModuleList([nn.Linear(in_dim, num_hidden, bias=True) for in_dim in in_dims])
+        for fc in self.fc1_list:
+            nn.init.xavier_normal_(fc.weight, gain=1.414)
+            
+        self.fc2_list=nn.ModuleList([nn.Linear(num_hidden, num_classes, bias=True) for in_dim in in_dims])
+        for fc in self.fc2_list:
+            nn.init.xavier_normal_(fc.weight, gain=1.414)
+        
+        #self.fc2 = nn.Parameter(torch.Tensor(self.num_ntype,num_hidden*heads, num_hidden))#self.fc2=nn.Linear(num_hidden*heads,num_hidden,bias=True)
+        self.fc3 = nn.Parameter(torch.Tensor(self.num_ntype,num_classes*heads, num_classes))#self.fc2=nn.Linear(num_hidden*heads,num_hidden,bias=True)
+        nn.init.xavier_uniform_(self.fc3)
+        #self.fc3=nn.Linear(num_hidden*self.num_ntype,num_classes,bias=True)
+        self.fc4=nn.Linear(num_classes*self.num_ntype,num_classes,bias=True)
+        nn.init.xavier_uniform_(self.fc4.weight)
+        self.normalize=normalize
+        self.convs=[]
+        for _ in range(heads):
+            self.convs.append(nn.Sequential (   *[  GTNConv(num_etypes,g) for _ in range(num_convs)     ]))
+        self.ntype_indexer=ntype_indexer
+        self.convs=nn.ModuleList(self.convs)
+        self.count=0
+        
+
+    def forward(self,features_list, e_feat):
+        
+        h = []
+        for nt_id,(fc,fc_l, feature) in enumerate(zip(self.fc1_list,self.fc2_list, features_list)):
+            nt_ft=fc_l(F.elu(self.dropout(fc(feature))))
+            emsen_ft=torch.zeros([nt_ft.shape[0],nt_ft.shape[1]*self.num_ntype]).to(feature.device)
+            emsen_ft[:,nt_ft.shape[1]*nt_id:nt_ft.shape[1]*(nt_id+1)]=nt_ft
+            h.append(emsen_ft)   # the id is decided by the node types
+        h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
+        #只有变成h.view(-1,num_ntypes,hidden_dim)才安全
+
+
+        #h=self.fc1(h)
+        z=[]
+        for convs_head in self.convs:
+            ones=torch.ones([h.shape[0],1]).to(h.device)
+            deg=convs_head(ones)
+            norm=torch.pow(deg,-1)
+            norm[norm == float("Inf")] = 0
+            if self.normalize=="True":
+                z.append(norm*convs_head(h))
+            else:
+                z.append(convs_head(h))
+        z=torch.cat(z,1)#  num_nodes*(num_type*hidden_dim*num_heads)
+        z=F.relu(self.dropout(z))
+
+
+        ntype_indexer=self.ntype_indexer.permute(1,0)  #需要num_ntypes*num_nodes的0-1 one hot indexer
+        z=z.view(-1,self.heads,self.num_ntype,self.num_classes).permute(0,2,1,3).flatten(2,3)  # num_nodes*num_ntypes*(num_heads*num_hidden)
+        z=z.permute(1,0,2) # num_ntypes*num_nodes*(num_heads*num_hidden)
+        """
+        
+        y1=tensor([[1., 2., 3., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]])
+        y2=tensor([[-1., -2., -3., -0., -0., -0., -0., -0., -0., -0., -0., -0.],
+        [-0., -0., -0., -0., -0., -0., -3., -4., -5., -0., -0., -0.]])
+        
+        yt=torch.cat([y1,y2],1)
+        yt.view(-1,2,4,3).permute(0,2,1,3).flatten(2,3)
+            #>>>   tensor([[[ 1.,  2.,  3., -1., -2., -3.],
+                            [ 0.,  0.,  0., -0., -0., -0.],
+                            [ 0.,  0.,  0., -0., -0., -0.],
+                            [ 0.,  0.,  0., -0., -0., -0.]],
+
+                            [[ 0.,  0.,  0., -0., -0., -0.],
+                            [ 0.,  0.,  0., -0., -0., -0.],
+                            [ 3.,  4.,  5., -3., -4., -5.],
+                            [ 0.,  0.,  0., -0., -0., -0.]]])"""
+
+        z=torch.bmm(z,self.fc3)
+        #z=torch.bmm(z,self.fc2)*ntype_indexer+z*(1-ntype_indexer) # num_ntypes*num_nodes*num_hidden
+        z=z.permute(1,0,2).flatten(1,2)# num_nodes*(num_ntypes*num_hidden)
+        z=F.relu(self.dropout(z))
+
+             #
+        z=self.fc4(z)
+        logits=z                  #
+        encoded_embeddings=z 
+        if self.count%100==0:
+            for i,convs_head in enumerate(self.convs):
+                print(f"channel {i}") if i==0 else None
+                for j,mod in enumerate(convs_head):
+                    print(f"\tlayer {j} "+str(mod.filter.cpu().tolist())) if i==0 else None
+
+
+        self.count+=1
+
+        return logits, encoded_embeddings    #hidden_logits
+
+
+class slotGTNConv(nn.Module):
+    def __init__(self,
+                num_etypes,
+                g,
+                    allow_zero_in_degree = False):
+        super(slotGTNConv,self).__init__()
+        self.g=g
+        g.edge_type_indexer
+
+        self._allow_zero_in_degree = allow_zero_in_degree
+        self.w=nn.Parameter(torch.Tensor( 1,num_etypes ) )
+        self.reset_parameters()
+
+
+    def reset_parameters(self):
+        nn.init.normal_(self.w, std=0.01)
+    def set_allow_zero_in_degree(self, set_value):
+        self._allow_zero_in_degree = set_value
+
+    def forward(self,h):
+        #w=self.w.to(h.device)
+        w=self.w
+        graph=self.g
+        with graph.local_scope():
+            node_idx_by_ntype=graph.node_idx_by_ntype
+            if not self._allow_zero_in_degree:
+                if (graph.in_degrees() == 0).any():
+                    raise DGLError('There are 0-in-degree nodes in the graph, '
+                                   'output for those nodes will be invalid. '
+                                   'This is harmful for some applications, '
+                                   'causing silent performance regression. '
+                                   'Adding self-loop on the input graph by '
+                                   'calling `g = dgl.add_self_loop(g)` will resolve '
+                                   'the issue. Setting ``allow_zero_in_degree`` '
+                                   'to be `True` when constructing this module will '
+                                   'suppress the check and let the code run.')
+            self.filter = F.softmax(w, dim=1)
+            ew=(self.g.edge_type_indexer*self.filter).sum(1).unsqueeze(-1)
+
+            #normalization
+            """graph.srcdata.update({'ones': torch.ones([h.shape[0],1]).to(h.device)})
+            graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ones', 'ew', 'm'),
+                             fn.sum('m', 'deg'))
+            deg = graph.dstdata['deg']
+            norm=torch.pow(deg,-1)
+            norm[norm == float("Inf")] = 0"""
+
+            #propagate
+
+            graph.srcdata.update({'ft': h})
+            graph.edata.update({'ew': ew})
+            graph.update_all(fn.u_mul_e('ft', 'ew', 'm'),
+                             fn.sum('m', 'ft'))
+            rst = graph.dstdata['ft']
+        
+
+        return rst
+
+
+
+
+
 class MLP(nn.Module):
     def __init__(self,
                  g,

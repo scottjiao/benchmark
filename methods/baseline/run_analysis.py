@@ -12,7 +12,7 @@ import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
-from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP
+from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
 
 feature_usage_dict={0:"loaded features",
@@ -64,6 +64,10 @@ ap.add_argument('--ae_sampling_factor', type=float, default=0.01)
 ap.add_argument('--slot_aggregator', type=str, default="average")
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
+ap.add_argument('--get_out', default="False")  
+ap.add_argument('--normalize', default="True")  
+
+
 
 ap.add_argument('--search_num_heads', type=str, default="[8]")
 ap.add_argument('--search_lr', type=str, default="[1e-3,5e-4,1e-4]")
@@ -307,7 +311,7 @@ def run_model_DBLP(trial=None):
         eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
 
 
-
+    normalize=args.normalize
     LP_alpha=args.LP_alpha
     ntype_indexer=g.node_ntype_indexer
     ntype_acc=0
@@ -352,15 +356,17 @@ def run_model_DBLP(trial=None):
             net=LabelPropagation(num_layers, LP_alpha)
         elif args.net=='MLP':
             net=MLP(g,in_dims,hidden_dim,num_classes,num_layers,F.relu,args.dropout)
+        elif args.net=="slotGTN":
+            net=slotGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
         else:
             raise NotImplementedError()
 
             
         print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
-        print(net)  if args.verbose=="True" else None
+        #print(net)  if args.verbose=="True" else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
-        if args.net=='GTN':
+        if args.net in ['GTN','slotGTN']:
             ad_list=[]
             other_list=[]
             for pname, p in net.named_parameters():
@@ -441,11 +447,15 @@ def run_model_DBLP(trial=None):
             t_1_end = time.time()
             # print validation info
             if epoch%5==0:
-                print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} ntype acc: {:.4f}'.format(
-                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     ntype_acc      )      ) if args.verbose=="True" else None
+                
+                val_logits = logits[val_idx]
+                pred = val_logits.argmax(axis=1)
+                val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
+                print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
+                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if args.verbose=="True" else None
             # early stopping
             early_stopping(val_loss, net)
-            if early_stopping.early_stop:
+            if epoch>args.epoch/2 and early_stopping.early_stop:
                 #print('Early stopping!')
                 break
         
@@ -503,10 +513,10 @@ def run_model_DBLP(trial=None):
     print(f"trial.params: {str(trial.params)}")
     #print(optimizer) if args.verbose=="True" else None
 
-
-    out_fn=os.path.join("analysis",args.study_name+".out")
-    logits_save=logits_save.cpu().numpy()
-    np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)
+    if args.get_out=="True":
+        out_fn=os.path.join("analysis",args.study_name+".out")
+        logits_save=logits_save.cpu().numpy()
+        np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)
 
 
 

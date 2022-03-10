@@ -17,7 +17,7 @@ import dgl
 from matplotlib import pyplot as plt
 from matplotlib.pyplot import MultipleLocator
 import networkx
-
+from sklearn.metrics import f1_score
 
 feature_usage_dict={0:"loaded features",
 1:"only target node features (zero vec for others)",
@@ -68,10 +68,39 @@ def mat2tensor(mat):
 
 
 
+def get_heterophily_score(labeled_idx,netx_g,labels,kmax=2):
+    het_score={}
+    set_all_labeled_nodes=set(labeled_idx)
+    for node in labeled_idx:
+        k_neigh=[]
+        for k in range(1,kmax+1):
+            k_neigh_dict=networkx.single_source_shortest_path_length(netx_g, node, cutoff=k)
+            for idx in k_neigh_dict:
+                if k_neigh_dict[idx]==k:
+                    k_neigh.append(idx)
+        neighbor_with_labels=set(k_neigh).intersection(set_all_labeled_nodes)
+        labels_of_neighbors=labels[list(neighbor_with_labels)]
+        if len(labels_of_neighbors)==0:
+            continue
+        else:
+            label_of_node=labels[node]
+            het_score[node]=(((labels_of_neighbors==label_of_node).int().sum())/(len(labels_of_neighbors))).item()
+    return het_score
+
+
+def get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2):
+    scores=list(get_heterophily_score(labeled_idx,netx_g,labels,kmax=k).values())
+    hist, edges = np.histogram(
+        scores,
+        bins=10,
+        range=(0, 1),
+        density=False)
+    print(f"\thist: {hist} of dataset {dataset}")
 
 
 
-def analysis(dataset):
+
+def analysis(dataset,net,get_logits_way="average"):
     feats_type = 0
     """num_heads=args.num_heads
     lr=args.lr
@@ -93,7 +122,7 @@ def analysis(dataset):
     random.seed(1234)
     np.random.seed(1234)
 
-    device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     features_list = [mat2tensor(features).to(device) for features in features_list]
     if feats_type == 0:
         in_dims = [features.shape[1] for features in features_list]
@@ -306,32 +335,97 @@ def analysis(dataset):
                 ratio+=((labels_of_neighbors==label_of_node).int().sum())/(len(labels_of_neighbors))
         ratio=ratio/len(labeled_idx)
         print(f"homophily ratio of {k}-order: {ratio}")"""
-    print(dataset)
-    get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2)
+    print("*"*20)
+    print(dataset,net)
+    print("*"*20)
+    #get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2)
 
     node_num=adjM.shape[0]
-    logits_cum=torch.from_numpy(np.load(f"./analysis/get_best_outs_{dataset}_net_slotGCN.out.npy"))
-    logits_cum=F.softmax(logits_cum,dim=1)
-    re=(logits_cum.shape[0]/node_num)
-    assert int(re)-re==0
-    re=int(re)
-    logits=0
-    for i in range(re):
-        logits+=logits_cum[i*node_num:(i+1)*node_num,:]
-    logits=logits/re
+    if get_logits_way=="average":
+        logits_cum=torch.from_numpy(np.load(f"./analysis/get_best_outs_{dataset}_net_{net}.out.npy"))
+        logits_cum=F.softmax(logits_cum,dim=1)
+        re=(logits_cum.shape[0]/node_num)
+        assert int(re)-re==0
+        re=int(re)
+        logits=0
+        for i in range(re):
+            logits+=logits_cum[i*node_num:(i+1)*node_num,:]
+        logits=logits/re
+    else :
+        logits_cum=torch.from_numpy(np.load(f"./analysis/get_best_outs_{dataset}_net_{net}.out.npy"))
+        logits_cum=F.softmax(logits_cum,dim=1)
+        logits=logits_cum[get_logits_way*node_num:(get_logits_way+1)*node_num,:]
 
-    het_score=get_heterophily_score(labeled_idx,netx_g,labels,kmax=2)
-    labels=labels.cpu()
-    ntypes=ntypes.cpu()
-
+    ####################!!!!!!!!!!!!!!!!!!! labels没有test的信息！
+    labels[test_idx] = torch.from_numpy(dl.labels_test['data'][test_idx]).argmax(axis=1)
     #每一个类的自己的acc
-    class_acc=torch.zeros([max(labels)+1])
-    class_count=torch.zeros([max(labels)+1])
+    class_recall=torch.zeros([max(labels)+1])
+    class_recall_count=torch.zeros([max(labels)+1])
+    class_precision=torch.zeros([max(labels)+1])
+    class_precision_count=torch.zeros([max(labels)+1])
     for node in labeled_idx:
-        class_count[labels[node]]+=1
-        class_acc[labels[node]]+=int(torch.argmax(logits[node])==labels[node])
-    print(f"\tthe class count:  {class_count.numpy()}")
-    print(f"\tthe class acc:  {np.around((class_acc/class_count).numpy(),decimals=3)}")
+        class_recall_count[labels[node]]+=1
+        class_recall[labels[node]]+=int(torch.argmax(logits[node])==labels[node])
+        class_precision_count[torch.argmax(logits[node])]+=1
+        class_precision[torch.argmax(logits[node])]+=int(torch.argmax(logits[node])==labels[node])
+    #test每一个类的自己的acc
+    test_class_recall=torch.zeros([max(labels)+1])
+    test_class_recall_count=torch.zeros([max(labels)+1])
+    test_class_precision=torch.zeros([max(labels)+1])
+    test_class_precision_count=torch.zeros([max(labels)+1])
+    for node in test_idx:
+        test_class_recall_count[labels[node]]+=1
+        test_class_recall[labels[node]]+=int(torch.argmax(logits[node])==labels[node])
+        test_class_precision_count[torch.argmax(logits[node])]+=1
+        test_class_precision[torch.argmax(logits[node])]+=int(torch.argmax(logits[node])==labels[node])
+    mi_f1,ma_f1=f1_score(labels[labeled_idx], torch.argmax(logits[labeled_idx],dim=1).cpu().numpy(), average='micro'),f1_score(labels[labeled_idx], torch.argmax(logits[labeled_idx],dim=1).cpu().numpy(), average='macro')
+    test_mi_f1,test_ma_f1=f1_score(labels[test_idx], torch.argmax(logits[test_idx],dim=1).cpu().numpy(), average='micro'),f1_score(labels[test_idx], torch.argmax(logits[test_idx],dim=1).cpu().numpy(), average='macro')
+    test_class_precision=np.around((test_class_precision/test_class_precision_count).numpy(),decimals=3)
+    test_class_recall=np.around((test_class_recall/test_class_recall_count).numpy(),decimals=3)
+    class_precision=np.around((class_precision/class_precision_count).numpy(),decimals=3)
+    class_recall=np.around((class_recall/class_recall_count).numpy(),decimals=3)
+    onehot = np.eye(logits.shape[1], dtype=np.int32)
+    pred = onehot[logits[test_idx].cpu().numpy().argmax(axis=1)]
+    d=dl.evaluate(pred)
+    
+    print(f"\tthe test class count:  {test_class_recall_count.numpy()}")
+    print(f"\tthe test predicted class count:  {test_class_precision_count.numpy()}")
+    print(f"\tthe test class precision:  {test_class_precision}")
+    print(f"\tthe test class recall:  {test_class_recall}")
+
+
+    assert sum(test_class_recall_count.numpy())==sum(test_class_precision_count.numpy())
+    total=sum(test_class_recall_count.numpy())
+    fig, ax_left = plt.subplots()
+    ax_right = ax_left.twinx()
+    ax_left.plot(test_class_recall, color='black',label="recall")
+    ax_left.plot(test_class_precision, color='black', linestyle='dashed',label="precision")
+    ax_left.tick_params(axis='y', labelcolor='black')
+    ax_left.set_ylabel("accs", color='black')
+    ax_right.plot(test_class_recall_count.numpy()/total, color='red',label="true count")
+    ax_right.plot(test_class_precision_count.numpy()/total, color='red', linestyle='dashed',label="predicted count")
+    ax_right.tick_params(axis='y', labelcolor='red')
+    ax_right.set_ylabel("percentages", color='red')
+    x=list(range(len(test_class_recall)))
+    plt.xticks(x,x)
+    plt.title("accs_test_"+dataset+"_"+net)
+    #plt.ylim([0,1])
+    ax_left.legend(loc=1)
+    ax_right.legend(loc=2)
+    plt.savefig("./analysis/"+"accs_test_"+dataset+"_"+net+".png")
+    plt.cla()
+
+
+
+
+
+    print(f"\tthe all class count:  {class_recall_count.numpy()}")
+    print(f"\tthe all predicted class count:  {class_precision_count.numpy()}")
+    print(f"\tthe all class precision:  {class_precision}")
+    print(f"\tthe all class recall:  {class_recall}")
+    print(f"\treported test microf1: {d['micro-f1']:.3f}, macrof1: {d['macro-f1']:.3f}")
+    print(f"\tcomputed test microf1: {test_mi_f1:.3f}, macrof1: {test_ma_f1:.3f}")
+    print(f"\tcomputed all  microf1: {mi_f1:.3f}, macrof1: {ma_f1:.3f}")
 
 
     #class labels distribution跟node type有关系吗？
@@ -344,53 +438,60 @@ def analysis(dataset):
     
 
     #prediction accuracy 跟 heterophily程度有关系吗？
-    bins=np.zeros(10)
-    bins_flag=np.zeros(10)
-    for node in labeled_idx:
-        if node not in het_score:
-            continue
-        flag=   int(torch.argmax(logits[node])==labels[node])
-        het_pos=int(het_score[node]*10)
-        if het_pos==10:
-            het_pos=9
-        bins[het_pos]+=1
-        bins_flag[het_pos]+=flag
-    print(f"\tbins: {bins} of dataset {dataset}")
-    print(f"\tthe acc of bins:  {np.around(bins_flag/bins,decimals=3)} of dataset {dataset}")
+    het_score=get_heterophily_score(labeled_idx,netx_g,labels,kmax=2)
+    labels=labels.cpu()
+    ntypes=ntypes.cpu()
+    def vis(text,set_of_nodes):
+        bins=np.zeros(10)
+        bins_flag=np.zeros(10)
+        for node in set_of_nodes:
+            if node not in het_score:
+                continue
+            flag=   int(torch.argmax(logits[node])==labels[node])
+            het_pos=int(het_score[node]*10)
+            if het_pos==10:
+                het_pos=9
+            bins[het_pos]+=1
+            bins_flag[het_pos]+=flag
+        print(f"\t{text} bins: {bins} of dataset {dataset}")
+        print(f"\t{text} the acc of bins:  {np.around(bins_flag/bins,decimals=3)} of dataset {dataset}")
+        acc_datas=np.around(bins_flag/bins,decimals=3)
+        bins_data=bins
+        #vis
+        x=[j/10 for j in  range(len(acc_datas))]
+
+        left_data = acc_datas
+        total=sum(bins_data)
+        right_data =[ j/total for j in  bins_data]
+
+        fig, ax_left = plt.subplots()
+        ax_right = ax_left.twinx()
+
+        ax_left.plot([j+0.05 for j in x],left_data, color='black')
+        ax_left.tick_params(axis='y', labelcolor='black')
+        ax_left.set_ylabel("accs", color='black')
+        ax_right.plot([j+0.05 for j in x],right_data, color='red')
+        ax_right.tick_params(axis='y', labelcolor='red')
+        ax_right.set_ylabel("percentages", color='red')
+
+        plt.title(text+"_"+dataset+"_"+net)
+        #plt.ylim([0,1])
+        #plt.legend()
+        plt.xticks(x+[1],x+[1])
+        plt.savefig("./analysis/"+text+"_"+dataset+"_"+net+".png")
+        plt.cla()
+
+    
+    vis("all",labeled_idx)
+    vis("test",test_idx)
 
 
 
-def get_heterophily_score(labeled_idx,netx_g,labels,kmax=2):
-    het_score={}
-    set_all_labeled_nodes=set(labeled_idx)
-    for node in labeled_idx:
-        k_neigh=[]
-        for k in range(1,kmax+1):
-            k_neigh_dict=networkx.single_source_shortest_path_length(netx_g, node, cutoff=k)
-            for idx in k_neigh_dict:
-                if k_neigh_dict[idx]==k:
-                    k_neigh.append(idx)
-        neighbor_with_labels=set(k_neigh).intersection(set_all_labeled_nodes)
-        labels_of_neighbors=labels[list(neighbor_with_labels)]
-        if len(labels_of_neighbors)==0:
-            continue
-        else:
-            label_of_node=labels[node]
-            het_score[node]=(((labels_of_neighbors==label_of_node).int().sum())/(len(labels_of_neighbors))).item()
-    return het_score
-
-
-def get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2):
-    scores=list(get_heterophily_score(labeled_idx,netx_g,labels,kmax=k).values())
-    hist, edges = np.histogram(
-        scores,
-        bins=10,
-        range=(0, 1),
-        density=False)
-    print(f"\thist: {hist} of dataset {dataset}")
 
 for dataset in ["pubmed_HNE_complete",
                         "DBLP_GTN",
                         "ACM_GTN",
                         "IMDB_GTN",]:
-    analysis(dataset)
+    for net in ["slotGCN","GCN","MLP","LabelPropagation"]:
+        analysis(dataset,net)
+#analysis("pubmed_HNE_complete","LabelPropagation")
