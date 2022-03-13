@@ -68,6 +68,7 @@ ap.add_argument('--get_out', default="False")
 ap.add_argument('--normalize', default="True")  
 
 
+ap.add_argument('--ablation_deletion', default="None")   # None, 1-N
 
 ap.add_argument('--search_num_heads', type=str, default="[8]")
 ap.add_argument('--search_lr', type=str, default="[1e-3,5e-4,1e-4]")

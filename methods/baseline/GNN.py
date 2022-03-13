@@ -124,11 +124,11 @@ class slotGTN(nn.Module):
         z=self.fc4(z)
         logits=z                  #
         encoded_embeddings=z 
-        if self.count%100==0:
+        """if self.count%100==0:
             for i,convs_head in enumerate(self.convs):
                 print(f"channel {i}") if i==0 else None
                 for j,mod in enumerate(convs_head):
-                    print(f"\tlayer {j} "+str(mod.filter.cpu().tolist())) if i==0 else None
+                    print(f"\tlayer {j} "+str(mod.filter.cpu().tolist())) if i==0 else None"""
 
 
         self.count+=1

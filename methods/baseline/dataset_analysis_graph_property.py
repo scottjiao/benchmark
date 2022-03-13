@@ -492,6 +492,6 @@ for dataset in ["pubmed_HNE_complete",
                         "DBLP_GTN",
                         "ACM_GTN",
                         "IMDB_GTN",]:
-    for net in ["slotGCN","GCN","MLP","LabelPropagation"]:
+    for net in ["slotGTN"]:
         analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")
