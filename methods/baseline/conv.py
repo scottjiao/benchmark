@@ -9,7 +9,8 @@ from dgl.nn.pytorch import edge_softmax
 from dgl._ffi.base import DGLError
 from dgl.nn.pytorch.utils import Identity
 from dgl.utils import expand_as_pair
-
+import torch
+import torch.nn.functional as F
 
 # pylint: disable=W0235
 class slotGCNConv(nn.Module):
@@ -21,7 +22,7 @@ class slotGCNConv(nn.Module):
                  weight=True,
                  bias=True,
                  activation=None,
-                 allow_zero_in_degree=False,num_ntype=None,aggregator=None,slot_trans=None,ntype_indexer=None):
+                 allow_zero_in_degree=False,num_ntype=None,aggregator=None,slot_trans=None,ntype_indexer=None,semantic_trans="False",semantic_trans_normalize="row"):
         super(slotGCNConv, self).__init__()
         if norm not in ('none', 'both', 'right', 'left'):
             raise DGLError('Invalid norm value. Must be either "none", "both", "right" or "left".'
@@ -36,6 +37,10 @@ class slotGCNConv(nn.Module):
         self.ntype_indexer=ntype_indexer
         if slot_trans=="one":
             assert self.aggregator in ["last_fc",None]
+        
+        self.semantic_transition_matrix=nn.Parameter(th.Tensor(self.num_ntype , self.num_ntype))
+        self.semantic_trans=semantic_trans
+        self.semantic_trans_normalize=semantic_trans_normalize
 
         if weight:
             if self.aggregator=="last_fc":
@@ -63,6 +68,8 @@ class slotGCNConv(nn.Module):
             nn.init.xavier_uniform_(self.weight)
         if self.bias is not None:
             nn.init.zeros_(self.bias)
+        nn.init.xavier_uniform_(self.semantic_transition_matrix)
+            
 
     def set_allow_zero_in_degree(self, set_value):
         r"""
@@ -116,21 +123,35 @@ class slotGCNConv(nn.Module):
                                    ' create the module with flag weight=False.')
             else:
                 weight = self.weight
-
+            if self.semantic_trans=="True":
+                if self.semantic_trans_normalize=="row":
+                    dim_flag=1
+                elif self.semantic_trans_normalize=="col":
+                    dim_flag=0
+                st_m= F.softmax( self.semantic_transition_matrix,dim=dim_flag ).unsqueeze(0)
+                #st_m= F.softmax( torch.randn_like(self.semantic_transition_matrix),dim=dim_flag ).unsqueeze(0)# ruin exp!!! 
+                
+            elif self.semantic_trans=="False":
+                st_m=torch.eye(self.num_ntype).to(self.semantic_transition_matrix.device)
             
+            #st_m=torch.zeros_like()  # ruin exp!!! 
+            #print(st_m)
             if self._in_feats > self._out_feats:
                 if self.aggregator=="last_fc":
+                    feat_src=torch.matmul(st_m, feat_src.view(-1,self.num_ntype,self._in_feats)).flatten(1)
                     feat_src = th.mm(feat_src, weight)
                 elif self.slot_trans=="one":
                     ntype_indexer=self.ntype_indexer.permute(1,0)  #需要num_ntypes*num_nodes的0-1 one hot indexer
-                    feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
-                    
+                    #feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    feat_src=torch.matmul(st_m, feat_src.view(-1,self.num_ntype,self._in_feats)).permute(1,0,2)
                     if weight is not None:
                         feat_src = th.bmm(feat_src, weight)*ntype_indexer+feat_src*(1-ntype_indexer)
+                    
                     feat_src=feat_src.permute(1,0,2).flatten(1)
                 else:
                     ###reshape feat_src
-                    feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    #feat_src=feat_src.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    feat_src=torch.matmul(st_m, feat_src.view(-1,self.num_ntype,self._in_feats)).permute(1,0,2)
                     # mult W first to reduce the feature size for aggregation.
                     if weight is not None:
                         feat_src = th.bmm(feat_src, weight)
@@ -144,17 +165,21 @@ class slotGCNConv(nn.Module):
                 graph.update_all(aggregate_fn, fn.sum(msg='m', out='h'))
                 rst = graph.dstdata['h']
                 if self.aggregator=="last_fc":
+
+                    rst=torch.matmul(st_m,rst.view(-1,self.num_ntype,self._in_feats)).flatten(1)
+
                     rst = th.mm(rst, weight)
                 elif self.slot_trans=="one":
                     ntype_indexer=self.ntype_indexer.permute(1,0).unsqueeze(-1)  #需要num_ntypes*num_nodes的0-1 one hot indexer
-                    rst=rst.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    #rst=rst.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    rst=torch.matmul(st_m,rst.view(-1,self.num_ntype,self._in_feats)).permute(1,0,2)
                     
                     if weight is not None:
                         rst = th.bmm(rst, weight)*ntype_indexer+rst*(1-ntype_indexer)
                     rst=rst.permute(1,0,2).flatten(1)
                 else:
                     #######reshape feat_src
-                    rst=rst.view(-1,self.num_ntype,self._in_feats).permute(1,0,2)
+                    rst=torch.matmul(st_m,rst.view(-1,self.num_ntype,self._in_feats)).permute(1,0,2)
                     if weight is not None:
                         rst = th.bmm(rst, weight)
                     rst=rst.permute(1,0,2).flatten(1)
@@ -204,7 +229,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row"):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -218,7 +243,10 @@ class slotGATConv(nn.Module):
         self.eindexer=eindexer
         self.aggregator=aggregator
         self.num_ntype=num_ntype 
-        
+        self.semantic_transition_matrix=nn.Parameter(th.Tensor(self.num_ntype , self.num_ntype))
+        self.semantic_trans=semantic_trans
+        self.semantic_trans_normalize=semantic_trans_normalize
+
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
                 self._in_src_feats, out_feats * num_heads, bias=False)
@@ -340,6 +368,17 @@ class slotGATConv(nn.Module):
                 feat_dst = self.fc_dst(h_dst).view(-1, self._num_heads, self._out_feats)
                 raise Exception("!!!")
             else:
+                if self.semantic_trans=="True":
+                    if self.semantic_trans_normalize=="row":
+                        dim_flag=1
+                    elif self.semantic_trans_normalize=="col":
+                        dim_flag=0
+                    st_m= F.softmax( self.semantic_transition_matrix,dim=dim_flag ).unsqueeze(0).unsqueeze(0)
+                    #st_m= F.softmax( torch.randn_like(self.semantic_transition_matrix),dim=dim_flag ).unsqueeze(0).unsqueeze(0)# ruin exp!!! 
+                    #st_m= torch.zeros_like(self.semantic_transition_matrix).unsqueeze(0).unsqueeze(0)# ruin exp!!! 
+                    
+                elif self.semantic_trans=="False":
+                    st_m=torch.eye(self.num_ntype).to(self.semantic_transition_matrix.device)
                 #feature transformation first
                 h_src = h_dst = self.feat_drop(feat)   #num_nodes*(num_ntype*input_dim)
                 if self.n_type_mappings:
@@ -350,12 +389,18 @@ class slotGATConv(nn.Module):
                         -1, self._num_heads, self._out_feats))
                     feat_src = feat_dst = torch.cat(h_new, 0)
                 elif self.aggregator=="last_fc":
+                    h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
+                    h_src=torch.matmul(st_m,h_src)
+                    h_src=h_src.flatten(1)
+
                     feat_src = feat_dst = torch.mm(h_src,self.fc).view(-1,1,self._out_feats)
                 else:
                     if self.inputhead:
                         h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
+                        h_src=torch.matmul(st_m,h_src)
                     else:
                         h_src=h_src.view(-1,self._num_heads,self.num_ntype,int(self._in_src_feats/self._num_heads))
+                        h_src=torch.matmul(st_m,h_src)
                     h_dst=h_src=h_src.permute(2,0,1,3).flatten(2)  #num_ntype*num_nodes*(in_feat_dim)
                     #self.fc with num_ntype*(in_feat_dim)*(out_feats * num_heads)
                     

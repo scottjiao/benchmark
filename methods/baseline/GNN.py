@@ -296,7 +296,7 @@ class slotGCN(nn.Module):
                  num_classes,
                  num_layers,
                  activation,
-                 dropout,num_ntype,aggregator,slot_trans,ntype_indexer):
+                 dropout,num_ntype,aggregator,slot_trans,ntype_indexer,semantic_trans,semantic_trans_normalize):
         super(slotGCN, self).__init__()
         self.g = g
         self.num_ntype=num_ntype
@@ -308,12 +308,12 @@ class slotGCN(nn.Module):
         for fc in self.fc_list:
             nn.init.xavier_normal_(fc.weight, gain=1.414)
         # input layer
-        self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation, weight=False,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer))
+        self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation, weight=False,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         # hidden layers
         for i in range(num_layers - 1):
-            self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer))
+            self.layers.append(slotGCNConv(num_hidden, num_hidden, activation=activation,num_ntype=self.num_ntype,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         # output layer
-        self.layers.append(slotGCNConv(num_hidden, num_classes,num_ntype=self.num_ntype,aggregator=self.aggregator,ntype_indexer=ntype_indexer))
+        self.layers.append(slotGCNConv(num_hidden, num_classes,num_ntype=self.num_ntype,aggregator=self.aggregator,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         negative_slope=0.2
         self.leaky_relu = nn.LeakyReLU(negative_slope)
         self.dropout = nn.Dropout(p=dropout)
@@ -379,7 +379,7 @@ class slotGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer,aggregator="average"):
+                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -398,17 +398,17 @@ class slotGAT(nn.Module):
         # input projection (no residual)
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
             num_hidden, num_hidden, heads[0],
-            feat_drop, attn_drop, negative_slope, False, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,inputhead=True))
+            feat_drop, attn_drop, negative_slope, False, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,inputhead=True,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         # hidden layers
         for l in range(1, num_layers):
             # due to multi-head, the in_dim = num_hidden * num_heads
             self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
                 num_hidden* heads[l-1] , num_hidden, heads[l],
-                feat_drop, attn_drop, negative_slope, residual, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer))
+                feat_drop, attn_drop, negative_slope, residual, self.activation, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         # output projection
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
             num_hidden* heads[-2] , num_classes, heads[-1],
-            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregator=aggregator))
+            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregator=aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize))
         self.aggregator=aggregator
         assert aggregator in ["onedimconv","average","last_fc"]
         if self.aggregator=="onedimconv":

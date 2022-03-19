@@ -66,6 +66,8 @@ ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
 ap.add_argument('--normalize', default="True")  
+ap.add_argument('--semantic_trans', default="False")  
+ap.add_argument('--semantic_trans_normalize', default="row")  #row,col
 
 
 ap.add_argument('--ablation_deletion', default="None")   # None, 1-N
@@ -140,7 +142,8 @@ def run_model_DBLP(trial=None):
         feats_type = args.feats_type
         com_dim=args.com_dim
         L2_norm=True
-
+        semantic_trans=args.semantic_trans
+        semantic_trans_normalize=args.semantic_trans_normalize
         slot_aggregator=args.slot_aggregator
         slot_trans=args.slot_trans
         """num_heads=args.num_heads
@@ -342,13 +345,13 @@ def run_model_DBLP(trial=None):
         elif args.net=='changedGAT':
             net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         elif args.net=='slotGAT':
-            net = slotGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,slot_trans=slot_trans)
+            net = slotGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
         elif args.net=='GAT':
             net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
         elif args.net=='GCN':
             net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
         elif args.net=="slotGCN":
-            net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer)
+            net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
         elif args.net=='GTN':
             net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
         elif args.net=='attGTN':
