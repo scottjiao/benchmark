@@ -1,3 +1,4 @@
+from re import I
 import sys
 import pickle
 from numpy.core.numeric import identity
@@ -11,6 +12,7 @@ import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
+from utils.tools import func_args_parse,single_feat_net,multi_feat_net
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
@@ -69,6 +71,9 @@ ap.add_argument('--normalize', default="True")
 ap.add_argument('--semantic_trans', default="False")  
 ap.add_argument('--semantic_trans_normalize', default="row")  #row,col
 
+ap.add_argument('--selection_types', default="0_1")  #feats x_y_z
+ap.add_argument('--selection_weight_average', default="False")  #feat type '0 1' by default
+ap.add_argument('--lr_times_on_feat_average',type=int, default=1)  #1 100
 
 ap.add_argument('--ablation_deletion', default="None")   # None, 1-N
 
@@ -138,6 +143,7 @@ def run_model_DBLP(trial=None):
     hidden_dim=trial.suggest_categorical("hidden_dim", eval(args.search_hidden_dim))
     num_layers=trial.suggest_categorical("num_layers", eval(args.search_num_layers))
     lr_times_on_filter_GTN=trial.suggest_categorical("lr_times_on_filter_GTN", eval(args.search_lr_times_on_filter_GTN))
+    
     if True:
         feats_type = args.feats_type
         com_dim=args.com_dim
@@ -151,7 +157,7 @@ def run_model_DBLP(trial=None):
         weight_decay=args.weight_decay
         hidden_dim=args.hidden_dim
         num_layers=args.num_layers"""
-        
+        lr_times_on_feat_average=args.lr_times_on_feat_average
         ae_layer=args.ae_layer
         ae_sampling_factor=args.ae_sampling_factor
 
@@ -332,39 +338,65 @@ def run_model_DBLP(trial=None):
         total_idx=np.random.permutation(total_idx)
         train_idx,val_idx=total_idx[0:tr_len],total_idx[tr_len:tr_len+val_len]
 
+        selection_types=args.selection_types
 
-
-
+        if args.selection_weight_average=="True":
+            net_wrapper=multi_feat_net
+        elif args.selection_weight_average=="False":
+            net_wrapper=single_feat_net
 
         t_re0=time.time()
         num_classes = dl.labels_train['num_classes']
         heads = [num_heads] * num_layers + [1]
         if args.net=='myGAT':
             #net = myGAT(g, args.edge_feats, len(dl.links['count'])*2+1, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
-            net = myGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
+            #net = myGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
+            GNN=myGAT
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05)
         elif args.net=='changedGAT':
-            net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
+            #net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
+            GNN=changedGAT
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         elif args.net=='slotGAT':
-            net = slotGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            GNN=slotGAT
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            #net = slotGAT()
         elif args.net=='GAT':
-            net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
+            #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
+            GNN=GAT
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
         elif args.net=='GCN':
-            net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
+            #net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
+            GNN=GCN
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
         elif args.net=="slotGCN":
-            net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            #net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            GNN=slotGCN
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
         elif args.net=='GTN':
-            net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
+            #net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
+            GNN=GTN
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
         elif args.net=='attGTN':
-            net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+            #net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+            GNN=attGTN
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
         elif args.net=='LabelPropagation':
-            net=LabelPropagation(num_layers, LP_alpha)
+            #net=LabelPropagation(num_layers, LP_alpha)
+            GNN=LabelPropagation
+            fargs,fkargs=func_args_parse(num_layers, LP_alpha)
         elif args.net=='MLP':
-            net=MLP(g,in_dims,hidden_dim,num_classes,num_layers,F.relu,args.dropout)
+            #net=MLP(g,in_dims,hidden_dim,num_classes,num_layers,F.relu,args.dropout)
+            GNN=MLP
+            fargs,fkargs=func_args_parse(g,in_dims,hidden_dim,num_classes,num_layers,F.relu,args.dropout)
         elif args.net=="slotGTN":
-            net=slotGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
+            #net=slotGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
+            GNN=slotGTN
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
         else:
             raise NotImplementedError()
 
+        net=net_wrapper(selection_types,features_list,GNN,*fargs,**fkargs)
             
         print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
         #print(net)  if args.verbose=="True" else None
@@ -384,6 +416,18 @@ def run_model_DBLP(trial=None):
                                             {'params':ad_list,"lr":lr_times_on_filter_GTN*lr,"weight_decay":weight_decay},])
         elif args.net=="LabelPropagation":
             pass
+        elif args.selection_weight_average=="True":
+            ad_list=[]
+            other_list=[]
+            for pname, p in net.named_parameters():
+                #print(f"named pn: {pname} p: {p.shape}")
+            
+                if "average_weight" in pname:
+                    ad_list.append(p)
+                else:
+                    other_list.append(p)
+            optimizer = torch.optim.Adam([{'params':other_list,"lr":lr,"weight_decay":weight_decay},
+                                            {'params':ad_list,"lr":lr_times_on_feat_average*lr,"weight_decay":weight_decay},])
         else:
             optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -413,7 +457,8 @@ def run_model_DBLP(trial=None):
             logits,encoded_embeddings = net(features_list, e_feat) 
             logp = F.log_softmax(logits, 1)
             train_loss = F.nll_loss(logp[train_idx], labels[train_idx])
-
+            if args.get_out=="True" and args.verbose=="True":
+                print(net.W.flatten(0).cpu().tolist())
             #autoencoder for ntype
             if ae_layer!="None":
                 if "decoder" not in dec_dic.keys():
@@ -495,8 +540,10 @@ def run_model_DBLP(trial=None):
             logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             if re==0:
                 logits_save=logits
+                featW=net.W.flatten(0).cpu().tolist()
             else:
                 logits_save=torch.cat((logits_save,logits),0)
+                featW.append(net.W.flatten(0).cpu().tolist())
             test_logits = logits[test_idx]
             pred = test_logits.cpu().numpy().argmax(axis=1)
             onehot = np.eye(num_classes, dtype=np.int32)
@@ -510,17 +557,18 @@ def run_model_DBLP(trial=None):
         #print(f" this round cost {t_re}(s)")
         if args.net!="LabelPropagation":
             remove_ckp_files(ckp_dname=ckp_dname)
-    print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}")
-    print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
-    print(exp_info)
-    #print(net) if args.verbose=="True" else None
+    print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
+    print(exp_info);#print(net) if args.verbose=="True" else None
     print(f"trial.params: {str(trial.params)}")
     #print(optimizer) if args.verbose=="True" else None
 
     if args.get_out=="True":
-        out_fn=os.path.join("analysis",args.study_name+".out")
+        """out_fn=os.path.join("analysis",args.study_name+".out")
         logits_save=logits_save.cpu().numpy()
-        np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)
+        np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)"""
+        W_fn=os.path.join("analysis",args.study_name+".w");featW=np.array(featW);np.save(W_fn, featW, allow_pickle=True, fix_imports=True)
+
+        
 
 
 
@@ -534,6 +582,8 @@ def run_model_DBLP(trial=None):
         m="w"
     
     with open(fn,m) as f:
+        
+        f.write(f"  multi_feat_weight: {str(net.W.flatten(0).cpu().tolist())} \n") if args.selection_weight_average=="True" else None
         f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
         f.write(str(exp_info)+"\n")
         f.write(f"trial.params: {str(trial.params)}"+"\n")
@@ -583,6 +633,7 @@ if __name__ == '__main__':
     fn=os.path.join("log",args.study_name)
     if os.path.exists(fn):
         with open(fn,"a") as f:
+            
             f.write("Best trial:\n")
             f.write(f"  Value: {trial.value}\n", )
             f.write("  Params: \n")

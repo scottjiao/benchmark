@@ -6,6 +6,105 @@ from sklearn.metrics import f1_score, normalized_mutual_info_score, adjusted_ran
 from sklearn.cluster import KMeans
 from sklearn.svm import LinearSVC
 
+import torch.nn.functional as F
+import torch.nn as nn
+import copy
+
+
+
+def func_args_parse(*args,**kargs):
+    return args,kargs
+
+
+
+
+
+
+
+
+def single_feat_net(selection_types,features_list,net,*args,**kargs):
+    return net(*args,**kargs)
+
+class multi_feat_net(nn.Module): # 0 1 2 3
+    def __init__(self,selection_types,features_list,net,*args,**kargs):
+        super(multi_feat_net, self).__init__()
+        self.selection_types=selection_types.split("_")
+        self.average_weight=nn.Parameter(torch.FloatTensor(len(self.selection_types),1,1));nn.init.normal_(self.average_weight,std=1)
+        self.feature_list=None
+        net_name=str(net).split("'")[1].replace("GNN.","")
+        if net_name in ["GCN",'GAT',"slotGCN",'MLP']:
+            pos=1
+        elif net_name in ['GTN','attGTN',"slotGTN"]:
+            pos=2
+        elif net_name in ['myGAT','changedGAT','slotGAT']:
+            pos=3
+
+        #if feats_type == 0:
+        in_dims0 = [features.shape[1] for features in features_list]
+        self.features_list0=features_list
+        #elif feats_type == 1 
+        save = 0 
+        in_dims1 = []
+        self.features_list1=copy.deepcopy(features_list)
+        for i in range(0, len(features_list)):
+            if i == save:
+                in_dims1.append(features_list[i].shape[1])
+            else:
+                in_dims1.append(10)
+                self.features_list1[i] = torch.zeros((features_list[i].shape[0], 10)).to(features_list[0].device)
+        #elif feats_type == 2 
+        save = 0
+        in_dims2 = [features.shape[0] for features in features_list]
+        self.features_list2=copy.deepcopy(features_list)
+        for i in range(0, len(features_list)):
+            if i == save:
+                in_dims2[i] = features_list[i].shape[1]
+                continue
+            dim = features_list[i].shape[0]
+            indices = np.vstack((np.arange(dim), np.arange(dim)))
+            indices = torch.LongTensor(indices)
+            values = torch.FloatTensor(np.ones(dim))
+            self.features_list2[i] = torch.sparse.FloatTensor(indices, values, torch.Size([dim, dim])).to(features_list[0].device)
+        #elif feats_type == 3:
+        in_dims3 = [features.shape[0] for features in features_list]
+        self.features_list3=copy.deepcopy(features_list)
+        for i in range(len(features_list)):
+            dim = features_list[i].shape[0]
+            indices = np.vstack((np.arange(dim), np.arange(dim)))
+            indices = torch.LongTensor(indices)
+            values = torch.FloatTensor(np.ones(dim))
+            self.features_list3[i] = torch.sparse.FloatTensor(indices, values, torch.Size([dim, dim])).to(features_list[0].device)
+
+
+        args0=list(copy.deepcopy(args));args0[pos]=in_dims0;args0=tuple(args0)
+        args1=list(copy.deepcopy(args));args1[pos]=in_dims1;args1=tuple(args1)
+        args2=list(copy.deepcopy(args));args2[pos]=in_dims2;args2=tuple(args2)
+        args3=list(copy.deepcopy(args));args3[pos]=in_dims3;args3=tuple(args3)
+        self.W=None
+        self.net0=net(*args0,**kargs)
+        self.net1=net(*args1,**kargs)
+        self.net2=net(*args2,**kargs)
+        self.net3=net(*args3,**kargs)
+
+
+    def forward(self,features_list,e_feat):
+
+        out=[]
+        out.append(self.net0(self.features_list0,e_feat)[0]) if "0" in self.selection_types else None
+        out.append(self.net1(self.features_list1,e_feat)[0]) if "1" in self.selection_types else None
+        out.append(self.net2(self.features_list2,e_feat)[0]) if "2" in self.selection_types else None
+        out.append(self.net3(self.features_list3,e_feat)[0]) if "3" in self.selection_types else None
+
+        out=torch.stack(out,dim=0) # 4*n*c
+        w=F.softmax(self.average_weight,dim=0)
+        #print(w.flatten(0).cpu().tolist())
+        out=(w*out).sum(0)
+        self.W=w
+        return out,None
+
+
+
+
 
 def idx_to_one_hot(idx_arr):
     one_hot = np.zeros((idx_arr.shape[0], idx_arr.max() + 1))
