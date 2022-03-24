@@ -53,3 +53,9 @@ for dataset,worker_num,re in dataset_to_evaluate:
             p.join()
 
 
+"""
+for key in f_1.keys():
+    assert key in f_2.keys()
+    if f_1[key]!=f_2[key]:
+        print(f"key: {key}, f_1: {f_1[key]}| f_2: {f_2[key]}")
+"""

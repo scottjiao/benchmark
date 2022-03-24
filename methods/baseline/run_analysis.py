@@ -26,7 +26,7 @@ feature_usage_dict={0:"loaded features",
 }
 
 ap = argparse.ArgumentParser(description='MRGNN testing for the DBLP dataset')
-ap.add_argument('--feats-type', type=int, default=3,
+ap.add_argument('--feats-type', type=int, default=0,
                 help='Type of the node features used. ' +
                         '0 - loaded features; ' +
                         '1 - only target node features (zero vec for others); ' +
@@ -175,7 +175,7 @@ def run_model_DBLP(trial=None):
                     f"\n\tedge num: {adjM.nnz}"+\
                     f"\n\tclass num: {max(labels)+1}"+\
                     f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[args.feats_type]}"+"\n"+f"exp setting: {vars(args)}"+"\n"
-        #print(exp_info)
+        print(exp_info) if args.verbose else None
 
         torch.manual_seed(1234)
         random.seed(1234)
@@ -183,6 +183,7 @@ def run_model_DBLP(trial=None):
 
         device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
         features_list = [mat2tensor(features).to(device) for features in features_list]
+        assert feats_type==0 if args.selection_weight_average=="True" else None
         if feats_type == 0:
             in_dims = [features.shape[1] for features in features_list]
         elif feats_type == 1 or feats_type == 5:
