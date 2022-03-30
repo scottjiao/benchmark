@@ -515,13 +515,14 @@ def run_model_DBLP(trial=None):
                 print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
                 epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
             if args.get_out=="True":
-                w=net.W.flatten(0).cpu().tolist()
-                if args.verbose=="True":
-                    print(w)
-                vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
-                vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
-                vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
-                vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
+                if args.selection_weight_average=="True":
+                    w=net.W.flatten(0).cpu().tolist()
+                    if args.verbose=="True":
+                        print(w)
+                    vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
+                    vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
+                    vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
+                    vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
             # early stopping
             early_stopping(val_loss, net)
             if epoch>args.epoch/2 and early_stopping.early_stop:

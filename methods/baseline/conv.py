@@ -651,7 +651,7 @@ class changedGATConv(nn.Module):
             # then message passing
             graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
                              fn.sum('m', 'ft'))
-                             
+            
             rst = graph.dstdata['ft']
             # residual
             if self.res_fc is not None:

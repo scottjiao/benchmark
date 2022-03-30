@@ -48,9 +48,22 @@ class vis_data_collector():
         f.close()
     
     def load(self,fn):
-        f = open(fn+".json", 'r')
+        f = open(fn, 'r')
         self.data_dict= json.load(f)
         f.close()
+
+    def trans_to_numpy(self,name,epoch_range=None):
+        data=[]
+        re=0
+        while f"re-{re}" in self.data_dict.keys():
+            data.append([])
+            for i in range(epoch_range):
+                data[re].append(self.data_dict[f"re-{re}"][f"epoch-{i}"][name])
+            re+=1
+        data=np.array(data)
+        return np.mean(data,axis=0),np.std(data,axis=0)
+                
+                    
 
 
 
