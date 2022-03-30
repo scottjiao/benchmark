@@ -7,8 +7,12 @@ data/
 *.code-workspace
 *[0123456789].txt
 **plan.txt
+**.pyc
 *.pyc
 *.db
 *.png
 *.npy
 *records
+**/testout
+**/temp
+**/analysis

@@ -7,12 +7,13 @@ import time
 import argparse
 import os
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
-from utils.tools import func_args_parse,single_feat_net,multi_feat_net
+from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
@@ -67,6 +68,9 @@ ap.add_argument('--slot_aggregator', type=str, default="average")
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
+ap.add_argument('--get_test_for_online', default="False")  
+
+
 ap.add_argument('--normalize', default="True")  
 ap.add_argument('--semantic_trans', default="False")  
 ap.add_argument('--semantic_trans_normalize', default="row")  #row,col
@@ -165,17 +169,19 @@ def run_model_DBLP(trial=None):
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
             assert n_type_mappings 
-
-
+        multi_labels=True if args.dataset in ["IMDB"] else False
 
         #num_heads=1
         #hiddens=[int(i) for i in args.hiddens.split("_")]
         features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
+        class_num=max(labels)+1 if not multi_labels else len(labels[0])
         exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                     f"\n\tedge num: {adjM.nnz}"+\
-                    f"\n\tclass num: {max(labels)+1}"+\
+                    f"\n\tclass num: {class_num}"+\
                     f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[args.feats_type]}"+"\n"+f"exp setting: {vars(args)}"+"\n"
         print(exp_info) if args.verbose else None
+        vis_data_saver=vis_data_collector()
+        vis_data_saver.save_meta(exp_info,"exp_info")
 
         torch.manual_seed(1234)
         random.seed(1234)
@@ -183,7 +189,8 @@ def run_model_DBLP(trial=None):
 
         device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
         features_list = [mat2tensor(features).to(device) for features in features_list]
-        assert feats_type==0 if args.selection_weight_average=="True" else None
+        if args.selection_weight_average=="True":
+            assert feats_type==0 
         if feats_type == 0:
             in_dims = [features.shape[1] for features in features_list]
         elif feats_type == 1 or feats_type == 5:
@@ -215,7 +222,7 @@ def run_model_DBLP(trial=None):
                 indices = torch.LongTensor(indices)
                 values = torch.FloatTensor(np.ones(dim))
                 features_list[i] = torch.sparse.FloatTensor(indices, values, torch.Size([dim, dim])).to(device)
-        labels = torch.LongTensor(labels).to(device)
+        labels = torch.LongTensor(labels).to(device)  if not multi_labels else  torch.FloatTensor(labels).to(device)
         train_idx = train_val_test_idx['train_idx']
         train_idx = np.sort(train_idx)
         val_idx = train_val_test_idx['val_idx']
@@ -274,10 +281,10 @@ def run_model_DBLP(trial=None):
 
 
 
+        loss = nn.BCELoss() if multi_labels else F.nll_loss
+        #g.edge_type_indexer=F.one_hot(e_feat).to(device)
 
-        g.edge_type_indexer=F.one_hot(e_feat).to(device)
-
-        if os.path.exists(f"./temp/{args.dataset}.nec"):
+        """if os.path.exists(f"./temp/{args.dataset}.nec"):
             with open(f"./temp/{args.dataset}.nec","rb") as f:
                 g.node_etype_collector=pickle.load(f).to(device)
         else:
@@ -288,9 +295,10 @@ def run_model_DBLP(trial=None):
                 etype=etype.cpu().item()
                 g.node_etype_collector[u,etype]=1
             with open(f"./temp/{args.dataset}.nec","wb") as f:
-                pickle.dump(g.node_etype_collector,f)
+                pickle.dump(g.node_etype_collector,f)"""
         
-        num_etype=g.edge_type_indexer.shape[1]
+        #num_etype=g.edge_type_indexer.shape[1]
+        num_etype=len(dl.links['count'])*2+1
         num_ntypes=len(features_list)
         #num_layers=len(hiddens)-1
         num_nodes=dl.nodes['total']
@@ -319,7 +327,8 @@ def run_model_DBLP(trial=None):
 
 
         etype_specified_attention=eval(args.etype_specified_attention)
-        eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
+        #eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
+        eindexer=None
 
 
     normalize=args.normalize
@@ -330,6 +339,7 @@ def run_model_DBLP(trial=None):
     ma_F1s=[]
     mi_F1s=[]
     val_accs=[]
+    val_losses=[]
     for re in range(args.repeat):
 
 
@@ -456,10 +466,9 @@ def run_model_DBLP(trial=None):
             net.train()
 
             logits,encoded_embeddings = net(features_list, e_feat) 
-            logp = F.log_softmax(logits, 1)
-            train_loss = F.nll_loss(logp[train_idx], labels[train_idx])
-            if args.get_out=="True" and args.verbose=="True":
-                print(net.W.flatten(0).cpu().tolist())
+            logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
+            train_loss = loss(logp[train_idx], labels[train_idx]) if not multi_labels else loss(logp[train_idx], labels[train_idx])
+            
             #autoencoder for ntype
             if ae_layer!="None":
                 if "decoder" not in dec_dic.keys():
@@ -492,17 +501,27 @@ def run_model_DBLP(trial=None):
             net.eval()
             with torch.no_grad():
                 logits,_ = net(features_list, e_feat)
-                logp = F.log_softmax(logits, 1)
-                val_loss = F.nll_loss(logp[val_idx], labels[val_idx])
+                logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
+                val_loss = loss(logp[val_idx], labels[val_idx])
             t_1_end = time.time()
+            
             # print validation info
-            if epoch%5==0:
+            if not  multi_labels:
                 
                 val_logits = logits[val_idx]
                 pred = val_logits.argmax(axis=1)
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
+                
                 print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
-                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if args.verbose=="True" else None
+                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
+            if args.get_out=="True":
+                w=net.W.flatten(0).cpu().tolist()
+                if args.verbose=="True":
+                    print(w)
+                vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
+                vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
+                vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
+                vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
             # early stopping
             early_stopping(val_loss, net)
             if epoch>args.epoch/2 and early_stopping.early_stop:
@@ -510,18 +529,22 @@ def run_model_DBLP(trial=None):
                 break
         
         # validation with evaluate_results_nc
-        if args.net!="LabelPropagation":
-            net.load_state_dict(torch.load(ckp_fname))
-        net.eval()
-        with torch.no_grad():
-            logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
-            val_logits = logits[val_idx]
-            pred = val_logits.argmax(axis=1)
-            val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
-        val_accs.append(val_acc)
+        if not multi_labels:
+            if args.net!="LabelPropagation":
+                net.load_state_dict(torch.load(ckp_fname))
+            net.eval()
+            with torch.no_grad():
+                logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
+                val_logits = logits[val_idx]
+                pred = val_logits.argmax(axis=1)
+                val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
+            val_accs.append(val_acc)
 
-        
-        score=sum(val_accs)/len(val_accs)
+            
+            score=sum(val_accs)/len(val_accs)
+        else:
+            val_losses.append(val_loss)
+            score=sum(val_losses)/len(val_losses)
         trial.report(score, re)
         # Handle pruning based on the intermediate value.
         if trial.should_prune():
@@ -541,15 +564,21 @@ def run_model_DBLP(trial=None):
             logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             if re==0:
                 logits_save=logits
-                featW=net.W.flatten(0).cpu().tolist()
+                featW=net.W.flatten(0).cpu().tolist() if args.selection_weight_average=="True" else None
             else:
                 logits_save=torch.cat((logits_save,logits),0)
-                featW.append(net.W.flatten(0).cpu().tolist())
+                featW.append(net.W.flatten(0).cpu().tolist()) if args.selection_weight_average=="True" else None
             test_logits = logits[test_idx]
-            pred = test_logits.cpu().numpy().argmax(axis=1)
+            pred = test_logits.cpu().numpy().argmax(axis=1) if not multi_labels else (test_logits.cpu().numpy()>0).astype(int)
             onehot = np.eye(num_classes, dtype=np.int32)
-            dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"{args.dataset}_{args.run}.txt")
-            pred = onehot[pred]
+            if args.get_test_for_online=="True":
+                assert args.repeat==5
+                assert args.trial_num==1
+                if not os.path.exists(f"./testout/{ args.study_name.replace(args.dataset+'_','')}"):
+                    os.mkdir(f"./testout/{ args.study_name.replace(args.dataset+'_','')}")
+                dl_mode='multi' if multi_labels else 'bi'
+                dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"./testout/{ args.study_name.replace(args.dataset+'_','')}/{args.dataset}_{re}.txt",mode=dl_mode)
+            pred = onehot[pred] if not multi_labels else  pred
             d=dl.evaluate(pred)
             print(d) if args.verbose=="True" else None
         ma_F1s.append(d["macro-f1"])
@@ -558,6 +587,7 @@ def run_model_DBLP(trial=None):
         #print(f" this round cost {t_re}(s)")
         if args.net!="LabelPropagation":
             remove_ckp_files(ckp_dname=ckp_dname)
+    vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(ma_F1s)) ),2),name="macro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(ma_F1s)) ),2),name="macro-f1-std");vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(mi_F1s)) ),2),name="micro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(mi_F1s)) ),2),name="micro-f1-std")
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info);#print(net) if args.verbose=="True" else None
     print(f"trial.params: {str(trial.params)}")
@@ -567,8 +597,13 @@ def run_model_DBLP(trial=None):
         """out_fn=os.path.join("analysis",args.study_name+".out")
         logits_save=logits_save.cpu().numpy()
         np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)"""
-        W_fn=os.path.join("analysis",args.study_name+".w");featW=np.array(featW);np.save(W_fn, featW, allow_pickle=True, fix_imports=True)
-
+        #if args.selection_weight_average=="True":
+            #W_fn=os.path.join("analysis",args.study_name+".w");featW=np.array(featW);np.save(W_fn, featW, allow_pickle=True, fix_imports=True)
+        if not os.path.exists(f"./analysis"):
+            os.mkdir("./analysis")
+        if not os.path.exists(f"./analysis/{args.study_name}"):
+            os.mkdir(f"./analysis/{args.study_name}")
+        vis_data_saver.save(os.path.join(f"./analysis/{args.study_name}",args.study_name+".visdata"))
         
 
 

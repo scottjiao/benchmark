@@ -9,14 +9,48 @@ from sklearn.svm import LinearSVC
 import torch.nn.functional as F
 import torch.nn as nn
 import copy
-
-
+import json
+import pickle
 
 def func_args_parse(*args,**kargs):
     return args,kargs
 
 
 
+class vis_data_collector():
+    #all data must be simple python objects like int or 'str'
+    def __init__(self):
+        self.data_dict={}
+        #formatting:
+        #
+        # {"meta":{****parameters and study name},"re-1":{"epoch-0":{"loss":0.1,"w1":1},"epoch-1":{"loss":0.2,"w1":2},...}}
+
+    def save_meta(self,meta_data,meta_name):
+        self.data_dict["meta"]={meta_name:meta_data}
+
+    def collect_in_training(self,data,name,re,epoch,r=4):
+        if f"re-{re}" not in self.data_dict.keys():
+            self.data_dict[f"re-{re}" ]={}
+        if f"epoch-{epoch}" not in self.data_dict[f"re-{re}" ].keys():
+            self.data_dict[f"re-{re}" ][f"epoch-{epoch}"]={}
+        if type(data)==float:
+            data=round(data,r)
+        self.data_dict[f"re-{re}" ][f"epoch-{epoch}"][name]=data
+
+    def collect_whole_process(self,data,name):
+        self.data_dict[name]=data
+
+
+    def save(self,fn):
+        
+        f = open(fn+".json", 'w')
+        json.dump(self.data_dict, f, indent=4)
+        f.close()
+    
+    def load(self,fn):
+        f = open(fn+".json", 'r')
+        self.data_dict= json.load(f)
+        f.close()
 
 
 
@@ -85,6 +119,7 @@ class multi_feat_net(nn.Module): # 0 1 2 3
         self.net1=net(*args1,**kargs)
         self.net2=net(*args2,**kargs)
         self.net3=net(*args3,**kargs)
+        self.epoch_count=0
 
 
     def forward(self,features_list,e_feat):
@@ -96,10 +131,19 @@ class multi_feat_net(nn.Module): # 0 1 2 3
         out.append(self.net3(self.features_list3,e_feat)[0]) if "3" in self.selection_types else None
 
         out=torch.stack(out,dim=0) # 4*n*c
-        w=F.softmax(self.average_weight,dim=0)
+        if 0<=self.epoch_count<=100:
+            w=torch.Tensor([1,0]).to(out.device).unsqueeze(-1).unsqueeze(-1)
+        elif 100<=self.epoch_count<=200:
+            w=torch.Tensor([0,1]).to(out.device).unsqueeze(-1).unsqueeze(-1)
+        else:
+            w=F.softmax(self.average_weight,dim=0)
         #print(w.flatten(0).cpu().tolist())
         out=(w*out).sum(0)
         self.W=w
+
+        if self.training:
+            self.epoch_count+=1
+
         return out,None
 
 
