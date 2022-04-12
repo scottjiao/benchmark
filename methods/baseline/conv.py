@@ -582,7 +582,8 @@ class changedGATConv(nn.Module):
 
     def forward(self, graph, feat, e_feat, res_attn=None):
         with graph.local_scope():
-            node_idx_by_ntype=graph.node_idx_by_ntype
+            if self.n_type_mappings:
+                node_idx_by_ntype=graph.node_idx_by_ntype
             if not self._allow_zero_in_degree:
                 if (graph.in_degrees() == 0).any():
                     raise DGLError('There are 0-in-degree nodes in the graph, '

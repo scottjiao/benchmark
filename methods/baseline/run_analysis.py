@@ -57,6 +57,8 @@ ap.add_argument('--bias', type=str, default="true")
 ap.add_argument('--net', type=str, default="myGAT")
 ap.add_argument('--n_type_mappings', type=str, default="False")
 ap.add_argument('--res_n_type_mappings', type=str, default="False")
+
+ap.add_argument('--task_property', type=str, default="notSpecified")
 ap.add_argument('--study_name', type=str, default="temp")
 ap.add_argument('--study_storage', type=str, default="sqlite:///db/temp.db")
 ap.add_argument('--trial_num', type=int, default=50)
@@ -169,11 +171,11 @@ def run_model_DBLP(trial=None):
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
             assert n_type_mappings 
-        multi_labels=True if args.dataset in ["IMDB"] else False
+        multi_labels=True if args.dataset in ["IMDB","IMDB_corrected"] else False
 
         #num_heads=1
         #hiddens=[int(i) for i in args.hiddens.split("_")]
-        features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset)
+        features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset,multi_labels=multi_labels)
         class_num=max(labels)+1 if not multi_labels else len(labels[0])
         exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                     f"\n\tedge num: {adjM.nnz}"+\

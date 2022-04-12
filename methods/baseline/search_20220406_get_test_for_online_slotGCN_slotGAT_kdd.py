@@ -15,13 +15,14 @@ class Run( multiprocessing.Process):
 
 dataset_to_evaluate=[("DBLP",1,20),("ACM",1,20),("IMDB",1,20),("Freebase",1,30)]
 #dataset_to_evaluate=[("IMDB",1,20)]
-fixed_info={"search_num_layers":"[2]","search_hidden_dim":"[64]","get_test_for_online":"True"}
-task_to_evaluate=[{"net":"GCN"}]
+fixed_info={"get_test_for_online":"True","slot_aggregator":"last_fc",
+            "epoch":"800",}
+task_to_evaluate=[{"net":"slotGCN","net":"slotGAT",}]
 gpus=["0"]
 total_trial_num=1
 
 
-yes=["baseline","kdd"]
+yes=["technique","kdd"]
 no=[]
 
 for dataset,worker_num,repeat in dataset_to_evaluate:
@@ -96,7 +97,6 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
         for key in fixed_info.keys():
             fixed_str+=f" --{key} {fixed_info[key]} "
 
-        continue
         study_name=f"get_test_for_online_{dataset}_net_{task['net']}"
         study_storage=f"sqlite:///db/{study_name}.db"
         #trial_num=int(total_trial_num/ (len(gpus)*worker_num) )

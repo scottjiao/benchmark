@@ -4,7 +4,7 @@ import scipy
 import pickle
 import scipy.sparse as sp
 
-def load_data(prefix='DBLP'):
+def load_data(prefix='DBLP',multi_labels=False):
     from scripts.data_loader import data_loader
     dl = data_loader('../../data/'+prefix)
     features = []
@@ -27,7 +27,8 @@ def load_data(prefix='DBLP'):
     test_idx = np.nonzero(dl.labels_test['mask'])[0]
     labels[train_idx] = dl.labels_train['data'][train_idx]
     labels[val_idx] = dl.labels_train['data'][val_idx]
-    if prefix != 'IMDB':
+    #if prefix != 'IMDB':
+    if not multi_labels:
         labels = labels.argmax(axis=1)
     train_val_test_idx = {}
     train_val_test_idx['train_idx'] = train_idx
