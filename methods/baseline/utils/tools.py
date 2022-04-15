@@ -144,10 +144,21 @@ class multi_feat_net(nn.Module): # 0 1 2 3
         out.append(self.net3(self.features_list3,e_feat)[0]) if "3" in self.selection_types else None
 
         out=torch.stack(out,dim=0) # 4*n*c
-        if 0<=self.epoch_count<=100:
+
+
+        """if 0<=self.epoch_count<=100:
             w=torch.Tensor([1,0]).to(out.device).unsqueeze(-1).unsqueeze(-1)
         elif 100<=self.epoch_count<=200:
             w=torch.Tensor([0,1]).to(out.device).unsqueeze(-1).unsqueeze(-1)
+        else:
+            w=F.softmax(self.average_weight,dim=0)"""
+        ind=int(self.epoch_count/100)
+        if ind<len(self.selection_types):
+
+            seed=[0 for _ in range(len(self.selection_types))]
+            seed[ind]=1
+
+            w=torch.Tensor(seed).to(out.device).unsqueeze(-1).unsqueeze(-1)
         else:
             w=F.softmax(self.average_weight,dim=0)
         #print(w.flatten(0).cpu().tolist())

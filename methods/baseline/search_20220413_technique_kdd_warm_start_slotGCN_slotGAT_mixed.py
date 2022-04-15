@@ -14,7 +14,7 @@ class Run( multiprocessing.Process):
         subprocess.run(self.command,shell=True)
 
 #dataset_to_evaluate=[("DBLP_GTN",2,20),("ACM_GTN",2,20),("IMDB_GTN",1,20),("pubmed_HNE_complete",1,30)]
-dataset_to_evaluate=[("DBLP_corrected",2,20),("ACM_corrected",2,20),("IMDB_corrected",2,20),]#("Freebase_corrected",1,20)]
+dataset_to_evaluate=[("DBLP_corrected",1,20),("ACM_corrected",1,20),("IMDB_corrected",1,20),]#("Freebase_corrected",1,20)]
 
 fixed_info={"search_num_layers":"[2,3]",
             "slot_aggregator":"last_fc",
