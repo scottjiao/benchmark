@@ -18,6 +18,17 @@ from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
 
+import wandb
+
+
+
+
+
+
+
+
+
+
 feature_usage_dict={0:"loaded features",
 1:"only target node features (zero vec for others)",
 2:"only target node features (id vec for others)",
@@ -342,9 +353,24 @@ def run_model_DBLP(trial=None):
     mi_F1s=[]
     val_accs=[]
     val_losses=[]
+    wandb.init(project=args.study_name, 
+            name=f"trial_num_{trial.number}",
+            # Track hyperparameters and run metadata
+            config={
+            "learning_rate": lr,
+            "architecture": args.net,
+            "dataset": args.dataset,
+            "num_heads": num_heads, 
+            "weight_decay": weight_decay, 
+            "hidden_dim":hidden_dim , 
+            "num_layers": num_layers, 
+            "lr_times_on_filter_GTN":lr_times_on_filter_GTN , 
+            },
+            reinit=True)
     for re in range(args.repeat):
-
-
+        
+        
+        
         #re-id the train-validation in each repeat
         tr_len,val_len=len(train_idx),len(val_idx)
         total_idx=np.concatenate([train_idx,val_idx])
@@ -458,7 +484,7 @@ def run_model_DBLP(trial=None):
         dec_dic={}
         #ntypes=None   #N*num_ntype
         
-        
+        wandb.watch(net, log_freq=5)
             
         for epoch in range(args.epoch):
             if args.net=="LabelPropagation"  :
@@ -513,7 +539,7 @@ def run_model_DBLP(trial=None):
                 val_logits = logits[val_idx]
                 pred = val_logits.argmax(axis=1)
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
-                
+                wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
                 print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
                 epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
             if args.get_out=="True":
@@ -574,22 +600,30 @@ def run_model_DBLP(trial=None):
             test_logits = logits[test_idx]
             pred = test_logits.cpu().numpy().argmax(axis=1) if not multi_labels else (test_logits.cpu().numpy()>0).astype(int)
             onehot = np.eye(num_classes, dtype=np.int32)
+            dl_mode='multi' if multi_labels else 'bi'
             if args.get_test_for_online=="True":
                 assert args.repeat==5
                 assert args.trial_num==1
                 if not os.path.exists(f"./testout/{ args.study_name.replace(args.dataset+'_','')}"):
                     os.mkdir(f"./testout/{ args.study_name.replace(args.dataset+'_','')}")
-                dl_mode='multi' if multi_labels else 'bi'
                 dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"./testout/{ args.study_name.replace(args.dataset+'_','')}/{args.dataset}_{re}.txt",mode=dl_mode)
             pred = onehot[pred] if not multi_labels else  pred
-            d=dl.evaluate(pred)
+            d=dl.evaluate(pred,mode=dl_mode)
             print(d) if args.verbose=="True" else None
+
+        wandb.log({f"macro-f1_{re}": d["macro-f1"], f"micro-f1_{re}": d["micro-f1"]})
         ma_F1s.append(d["macro-f1"])
         mi_F1s.append(d["micro-f1"])
         t_re1=time.time();t_re=t_re1-t_re0
         #print(f" this round cost {t_re}(s)")
         if args.net!="LabelPropagation":
             remove_ckp_files(ckp_dname=ckp_dname)
+    wandb.log({"macro-f1_total_mean":round(float(100*np.mean(np.array(ma_F1s)) ),2) ,
+    "macro-f1_total_std":round(float(100*np.std(np.array(ma_F1s)) ),2) ,
+     "micro-f1_total_mean": round(float(100*np.mean(np.array(mi_F1s)) ),2),
+     "micro-f1_total_std": round(float(100*np.std(np.array(mi_F1s)) ),2),
+    })
+    wandb.finish()
     vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(ma_F1s)) ),2),name="macro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(ma_F1s)) ),2),name="macro-f1-std");vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(mi_F1s)) ),2),name="micro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(mi_F1s)) ),2),name="micro-f1-std")
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info);#print(net) if args.verbose=="True" else None

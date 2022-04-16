@@ -2,7 +2,7 @@ import os
 import numpy as np
 import scipy.sparse as sp
 from collections import Counter, defaultdict
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score,multilabel_confusion_matrix
 import time
 
 
@@ -172,15 +172,18 @@ class data_loader:
             for nid, l in zip(test_idx, label):
                 f.write(f"{nid}\t\t{self.get_node_type(nid)}\t{l}\n")
 
-    def evaluate(self, pred):
+    def evaluate(self, pred, mode='bi'):
         #print(f"{bcolors.WARNING}Warning: If you want to obtain test score, please submit online on biendata.{bcolors.ENDC}")
         y_true = self.labels_test['data'][self.labels_test['mask']]
         micro = f1_score(y_true, pred, average='micro')
         macro = f1_score(y_true, pred, average='macro')
         result = {
             'micro-f1': micro,
-            'macro-f1': macro
+            'macro-f1': macro,
         }
+        if  mode=='multi':
+            mcm=multilabel_confusion_matrix(y_true, pred)
+            result.update({"mcm":mcm})
         return result
 
     def load_labels(self, name):

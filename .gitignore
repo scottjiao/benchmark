@@ -9,6 +9,7 @@ data/
 **plan.txt
 **.pyc
 *.pyc
+**__pycache__
 *.db
 *.png
 *.npy
@@ -16,3 +17,4 @@ data/
 **/testout
 **/temp
 **/analysis
+**/wandb
