@@ -4,9 +4,9 @@ import scipy
 import pickle
 import scipy.sparse as sp
 
-def load_data(prefix='DBLP',multi_labels=False):
+def load_data(prefix='DBLP',multi_labels=False,delete_type_nodes="None"):
     from scripts.data_loader import data_loader
-    dl = data_loader('../../data/'+prefix)
+    dl = data_loader('../../data/'+prefix,delete_type_nodes=delete_type_nodes)
     features = []
     for i in range(len(dl.nodes['count'])):
         th = dl.nodes['attr'][i]

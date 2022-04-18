@@ -4,7 +4,7 @@ import scipy.sparse as sp
 from collections import Counter, defaultdict
 from sklearn.metrics import f1_score,multilabel_confusion_matrix
 import time
-
+import copy
 
 class bcolors:
     HEADER = '\033[95m'
@@ -19,12 +19,17 @@ class bcolors:
 
 
 class data_loader:
-    def __init__(self, path):
+    def __init__(self, path,delete_type_nodes="None"):
+        if delete_type_nodes=="None":
+            self.delete_type_nodes=None
+        else:
+            self.delete_type_nodes=int(delete_type_nodes)
         self.path = path
         self.nodes = self.load_nodes()
         self.links = self.load_links()
         self.labels_train = self.load_labels('label.dat')
         self.labels_test = self.load_labels('label.dat.test')
+
 
     def get_sub_graph(self, node_types_tokeep):
         """
@@ -254,17 +259,46 @@ class data_loader:
             data: a dict of sparse matrices, each link type with one matrix. Shapes are all (nodes['total'], nodes['total'])
         """
         links = {'total':0, 'count':Counter(), 'meta':{}, 'data':defaultdict(list)}
+        r_ids=[]
         with open(os.path.join(self.path, 'link.dat'), 'r', encoding='utf-8') as f:
             for line in f:
                 th = line.split('\t')
                 h_id, t_id, r_id, link_weight = int(th[0]), int(th[1]), int(th[2]), float(th[3])
-                if r_id not in links['meta']:
-                    h_type = self.get_node_type(h_id)
-                    t_type = self.get_node_type(t_id)
-                    links['meta'][r_id] = (h_type, t_type)
-                links['data'][r_id].append((h_id, t_id, link_weight))
-                links['count'][r_id] += 1
-                links['total'] += 1
+                
+                #if h_type!=self.delete_type_nodes and t_type!=self.delete_type_nodes:
+                if h_id in self.old_to_new_id_mapping.keys() and t_id in self.old_to_new_id_mapping.keys() :
+                    h_id=self.old_to_new_id_mapping[h_id]
+                    t_id=self.old_to_new_id_mapping[t_id]
+                    if r_id not in links['meta']:
+                        h_type = self.get_node_type(h_id)
+                        t_type = self.get_node_type(t_id)
+                        links['meta'][r_id] = (h_type, t_type)
+                    links['data'][r_id].append((h_id, t_id, link_weight))
+                    links['count'][r_id] += 1
+                    links['total'] += 1
+                    if r_id not in r_ids:
+                        r_ids.append(r_id)
+        r_ids=sorted(r_ids)
+
+        temp_meta={}
+        for i in range(len(links['meta'].keys())):
+            temp_meta[i]=links['meta'][r_ids[i]]
+        links['meta']=temp_meta
+
+        temp_count={}
+        for i in range(len(links['count'].keys())):
+            temp_count[i]=links['count'][r_ids[i]]
+        links['count']=temp_count
+
+        temp_data={}
+        for i in range(len(links['data'].keys())):
+            temp_data[i]=links['data'][r_ids[i]]
+        links['data']=temp_data
+
+
+
+
+
         new_data = {}
         for r_id in links['data']:
             new_data[r_id] = self.list_to_sp_mat(links['data'][r_id])
@@ -281,6 +315,7 @@ class data_loader:
                         [ shift[node_type], shift[node_type]+count[node_type] )
         """
         nodes = {'total':0, 'count':Counter(), 'attr':{}, 'shift':{}}
+        node_ids=[]
         print(self.path)
         #with open(os.path.join(self.path, 'new.txt'), 'w') as f:
             #f.write("1")
@@ -295,18 +330,45 @@ class data_loader:
                     node_id = int(node_id)
                     node_type = int(node_type)
                     node_attr = list(map(float, node_attr.split(',')))
-                    nodes['count'][node_type] += 1
-                    nodes['attr'][node_id] = node_attr
-                    nodes['total'] += 1
+                    if node_type!=self.delete_type_nodes:
+                        node_ids.append(node_id)
+                        nodes['count'][node_type] += 1
+                        nodes['attr'][node_id] = node_attr
+                        nodes['total'] += 1
                 elif len(th) == 3:
                     # Then this line of node doesn't have attribute
                     node_id, node_name, node_type = th
                     node_id = int(node_id)
                     node_type = int(node_type)
-                    nodes['count'][node_type] += 1
-                    nodes['total'] += 1
+                    if node_type!=self.delete_type_nodes:
+                        node_ids.append(node_id)
+                        nodes['count'][node_type] += 1
+                        nodes['total'] += 1
                 else:
                     raise Exception("Too few information to parse!")
+        
+        #type_id mapping
+        temp_count=Counter()
+        for k in nodes['count']:
+            if k>self.delete_type_nodes:
+                temp_count[k-1]=nodes['count'][k]
+            else:
+                temp_count[k]=nodes['count'][k]
+        nodes['count']=temp_count
+
+        #node_id mapping
+        self.old_to_new_id_mapping={}
+        self.new_to_old_id_mapping={}
+        node_ids=sorted(node_ids)
+        for new_id in range(len(node_ids)):
+            self.old_to_new_id_mapping[node_ids[new_id]]=new_id
+            self.new_to_old_id_mapping[new_id]=node_ids[new_id]
+        temp_attr={}
+        for old_id in node_ids:
+            if old_id in nodes['attr'].keys():
+                temp_attr[self.old_to_new_id_mapping[old_id]]=nodes['attr'][old_id]
+        nodes['attr']=temp_attr
+
         shift = 0
         attr = {}
         for i in range(len(nodes['count'])):

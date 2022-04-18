@@ -20,7 +20,7 @@ import dgl
 
 import wandb
 
-
+from tqdm import tqdm
 
 
 
@@ -83,6 +83,7 @@ ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
 ap.add_argument('--get_test_for_online', default="False")  
 
+ap.add_argument('--delete_type_nodes', default="None")  
 
 ap.add_argument('--normalize', default="True")  
 ap.add_argument('--semantic_trans', default="False")  
@@ -177,6 +178,7 @@ def run_model_DBLP(trial=None):
         lr_times_on_feat_average=args.lr_times_on_feat_average
         ae_layer=args.ae_layer
         ae_sampling_factor=args.ae_sampling_factor
+        delete_type_nodes=args.delete_type_nodes
 
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
@@ -186,7 +188,7 @@ def run_model_DBLP(trial=None):
 
         #num_heads=1
         #hiddens=[int(i) for i in args.hiddens.split("_")]
-        features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset,multi_labels=multi_labels)
+        features_list, adjM, labels, train_val_test_idx, dl = load_data(args.dataset,multi_labels=multi_labels,delete_type_nodes=delete_type_nodes)
         class_num=max(labels)+1 if not multi_labels else len(labels[0])
         exp_info=f"dataset information :\n\tnode num: {adjM.shape[0]}\n\t\tattribute num: {features_list[0].shape[1]}\n\t\tnode type_num: {len(features_list)}\n\t\tnode type dist: {dl.nodes['count']}"+\
                     f"\n\tedge num: {adjM.nnz}"+\
@@ -243,27 +245,29 @@ def run_model_DBLP(trial=None):
         test_idx = train_val_test_idx['test_idx']
         test_idx = np.sort(test_idx)
         
-        if os.path.exists(f"./temp/{args.dataset}.ett"):
-            with open(f"./temp/{args.dataset}.ett","rb") as f:
-                edge2type=pickle.load(f)
-        else:
-            edge2type = {}
-            for k in dl.links['data']:
-                for u,v in zip(*dl.links['data'][k].nonzero()):
-                    edge2type[(u,v)] = k
-            for i in range(dl.nodes['total']):
-                if (i,i) not in edge2type:
-                    edge2type[(i,i)] = len(dl.links['count'])
-            count=1
-            for k in dl.links['data']:
-                for u,v in zip(*dl.links['data'][k].nonzero()):
-                    if (v,u) not in edge2type:
-                        edge2type[(v,u)] = count+1+len(dl.links['count'])
-                        count+=1
+        """if os.path.exists(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett"):
+            with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett","rb") as f:
+                #edge2type=pickle.load(f)
+                pass
+        else:"""
+        edge2type = {}
+        for k in dl.links['data']:
+            for u,v in zip(*dl.links['data'][k].nonzero()):
+                edge2type[(u,v)] = k
+        for i in range(dl.nodes['total']):
+            if (i,i) not in edge2type:
+                edge2type[(i,i)] = len(dl.links['count'])
+        count=0
+        for k in dl.links['data']:
+            for u,v in zip(*dl.links['data'][k].nonzero()):
+                if (v,u) not in edge2type:
+                    edge2type[(v,u)] = count+1+len(dl.links['count'])
+            count+=1
 
-            #this operation will make gap of etype ids.
-            with open(f"./temp/{args.dataset}.ett","wb") as f:
-                pickle.dump(edge2type,f)
+        #this operation will make gap of etype ids.
+        #with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett","wb") as f:
+            #pickle.dump(edge2type,f)
+            #pass
             
         
 
@@ -272,25 +276,26 @@ def run_model_DBLP(trial=None):
         g = dgl.add_self_loop(g)
         g = g.to(device)
         #reorganize the edge ids
-        if os.path.exists(f"./temp/{args.dataset}.eft"):
-            with open(f"./temp/{args.dataset}.eft","rb") as f:
-                e_feat=pickle.load(f)
-        else:
-            e_feat = []
-            count=0
-            count_mappings={}
-            counted_dict={}
-            for u, v in zip(*g.edges()):
-                u = u.cpu().item()
-                v = v.cpu().item()
-                if not counted_dict.setdefault(edge2type[(u,v)],False) :
-                    count_mappings[edge2type[(u,v)]]=count
-                    counted_dict[edge2type[(u,v)]]=True
-                    count+=1
-                e_feat.append(count_mappings[edge2type[(u,v)]])
-            e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
-            with open(f"./temp/{args.dataset}.eft","wb") as f:
-                pickle.dump(e_feat,f)
+        """if os.path.exists(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.eft"):
+            with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.eft","rb") as f:
+                #e_feat=pickle.load(f)
+                pass
+        else:"""
+        e_feat = []
+        count=0
+        count_mappings={}
+        counted_dict={}
+        for u, v in tqdm(zip(*g.edges())):
+            u = u.cpu().item()
+            v = v.cpu().item()
+            if not counted_dict.setdefault(edge2type[(u,v)],False) :
+                count_mappings[edge2type[(u,v)]]=count
+                counted_dict[edge2type[(u,v)]]=True
+                count+=1
+            e_feat.append(count_mappings[edge2type[(u,v)]])
+        e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
+        with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.eft","wb") as f:
+            pickle.dump(e_feat,f)
 
 
 
