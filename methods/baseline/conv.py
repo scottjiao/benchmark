@@ -246,6 +246,7 @@ class slotGATConv(nn.Module):
         self.semantic_transition_matrix=nn.Parameter(th.Tensor(self.num_ntype , self.num_ntype))
         self.semantic_trans=semantic_trans
         self.semantic_trans_normalize=semantic_trans_normalize
+        self.attentions=None
 
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
@@ -472,7 +473,9 @@ class slotGATConv(nn.Module):
             # activation
             if self.activation:
                 rst = self.activation(rst)
-            return rst, graph.edata.pop('a').detach()
+            self.attentions=graph.edata.pop('a').detach()
+            torch.cuda.empty_cache()
+            return rst, self.attentions
 
 
 

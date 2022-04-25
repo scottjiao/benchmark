@@ -350,7 +350,7 @@ class data_loader:
         #type_id mapping
         temp_count=Counter()
         for k in nodes['count']:
-            if k>self.delete_type_nodes:
+            if self.delete_type_nodes!=None and k>self.delete_type_nodes:
                 temp_count[k-1]=nodes['count'][k]
             else:
                 temp_count[k]=nodes['count'][k]

@@ -18,7 +18,7 @@ from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
 
-import wandb
+#import wandb
 
 from tqdm import tqdm
 
@@ -184,7 +184,7 @@ def run_model_DBLP(trial=None):
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
             assert n_type_mappings 
-        multi_labels=True if args.dataset in ["IMDB","IMDB_corrected"] else False
+        multi_labels=True if args.dataset in ["IMDB","IMDB_corrected","IMDB_corrected_oracle"] else False
 
         #num_heads=1
         #hiddens=[int(i) for i in args.hiddens.split("_")]
@@ -197,6 +197,14 @@ def run_model_DBLP(trial=None):
         print(exp_info) if args.verbose else None
         vis_data_saver=vis_data_collector()
         vis_data_saver.save_meta(exp_info,"exp_info")
+
+        
+        #check
+        """
+        if np.sum(np.sum(labels,dim=1)>1)>1 and not multi_labels:
+            raise Exception("Multi labels check failed!)
+        
+        """
 
         torch.manual_seed(1234)
         random.seed(1234)
@@ -254,16 +262,22 @@ def run_model_DBLP(trial=None):
         for k in dl.links['data']:
             for u,v in zip(*dl.links['data'][k].nonzero()):
                 edge2type[(u,v)] = k
+        count_self=0
         for i in range(dl.nodes['total']):
+            FLAG=0
             if (i,i) not in edge2type:
                 edge2type[(i,i)] = len(dl.links['count'])
-        count=0
+                FLAG=1
+        count_self+=FLAG
+        count_reverse=0
         for k in dl.links['data']:
+            FLAG=0
             for u,v in zip(*dl.links['data'][k].nonzero()):
                 if (v,u) not in edge2type:
                     edge2type[(v,u)] = count+1+len(dl.links['count'])
-            count+=1
-
+                    FLAG=1
+            count_reverse+=FLAG
+        num_etype=len(dl.links['count'])+count_self+count_reverse
         #this operation will make gap of etype ids.
         #with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett","wb") as f:
             #pickle.dump(edge2type,f)
@@ -285,7 +299,10 @@ def run_model_DBLP(trial=None):
         count=0
         count_mappings={}
         counted_dict={}
+        eid=0
+        etype_ids={}
         for u, v in tqdm(zip(*g.edges())):
+            
             u = u.cpu().item()
             v = v.cpu().item()
             if not counted_dict.setdefault(edge2type[(u,v)],False) :
@@ -293,6 +310,11 @@ def run_model_DBLP(trial=None):
                 counted_dict[edge2type[(u,v)]]=True
                 count+=1
             e_feat.append(count_mappings[edge2type[(u,v)]])
+            if edge2type[(u,v)] in etype_ids.keys():
+                etype_ids[edge2type[(u,v)]].append(eid)
+            else:
+                etype_ids[edge2type[(u,v)]]=[eid]
+            eid+=1
         e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
         with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.eft","wb") as f:
             pickle.dump(e_feat,f)
@@ -316,7 +338,7 @@ def run_model_DBLP(trial=None):
                 pickle.dump(g.node_etype_collector,f)"""
         
         #num_etype=g.edge_type_indexer.shape[1]
-        num_etype=len(dl.links['count'])*2+1
+        #num_etype=len(dl.links['count'])*2+1
         num_ntypes=len(features_list)
         #num_layers=len(hiddens)-1
         num_nodes=dl.nodes['total']
@@ -358,20 +380,20 @@ def run_model_DBLP(trial=None):
     mi_F1s=[]
     val_accs=[]
     val_losses=[]
-    wandb.init(project=args.study_name, 
-            name=f"trial_num_{trial.number}",
-            # Track hyperparameters and run metadata
-            config={
-            "learning_rate": lr,
-            "architecture": args.net,
-            "dataset": args.dataset,
-            "num_heads": num_heads, 
-            "weight_decay": weight_decay, 
-            "hidden_dim":hidden_dim , 
-            "num_layers": num_layers, 
-            "lr_times_on_filter_GTN":lr_times_on_filter_GTN , 
-            },
-            reinit=True)
+    #wandb.init(project=args.study_name, 
+    #        name=f"trial_num_{trial.number}",
+    #        # Track hyperparameters and run metadata
+    #        config={
+    #        "learning_rate": lr,
+    #        "architecture": args.net,
+    #        "dataset": args.dataset,
+    #        "num_heads": num_heads, 
+    #        "weight_decay": weight_decay, 
+     #       "hidden_dim":hidden_dim , 
+     #       "num_layers": num_layers, 
+    #        "lr_times_on_filter_GTN":lr_times_on_filter_GTN , 
+    #        },
+    #        reinit=True)
     for re in range(args.repeat):
         
         
@@ -489,7 +511,7 @@ def run_model_DBLP(trial=None):
         dec_dic={}
         #ntypes=None   #N*num_ntype
         
-        wandb.watch(net, log_freq=5)
+        #wandb.watch(net, log_freq=5)
             
         for epoch in range(args.epoch):
             if args.net=="LabelPropagation"  :
@@ -544,7 +566,7 @@ def run_model_DBLP(trial=None):
                 val_logits = logits[val_idx]
                 pred = val_logits.argmax(axis=1)
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
-                wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
+                #wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
                 print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
                 epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
             if args.get_out=="True":
@@ -556,6 +578,7 @@ def run_model_DBLP(trial=None):
                     vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
                     vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
                     vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
+                
             # early stopping
             early_stopping(val_loss, net)
             if epoch>args.epoch/2 and early_stopping.early_stop:
@@ -585,10 +608,6 @@ def run_model_DBLP(trial=None):
             raise optuna.exceptions.TrialPruned()
 
 
-
-
-
-
         # testing with evaluate_results_nc
         if args.net!="LabelPropagation":
             net.load_state_dict(torch.load(ckp_fname)) 
@@ -616,19 +635,19 @@ def run_model_DBLP(trial=None):
             d=dl.evaluate(pred,mode=dl_mode)
             print(d) if args.verbose=="True" else None
 
-        wandb.log({f"macro-f1_{re}": d["macro-f1"], f"micro-f1_{re}": d["micro-f1"]})
+        #wandb.log({f"macro-f1_{re}": d["macro-f1"], f"micro-f1_{re}": d["micro-f1"]})
         ma_F1s.append(d["macro-f1"])
         mi_F1s.append(d["micro-f1"])
         t_re1=time.time();t_re=t_re1-t_re0
         #print(f" this round cost {t_re}(s)")
         if args.net!="LabelPropagation":
             remove_ckp_files(ckp_dname=ckp_dname)
-    wandb.log({"macro-f1_total_mean":round(float(100*np.mean(np.array(ma_F1s)) ),2) ,
-    "macro-f1_total_std":round(float(100*np.std(np.array(ma_F1s)) ),2) ,
-     "micro-f1_total_mean": round(float(100*np.mean(np.array(mi_F1s)) ),2),
-     "micro-f1_total_std": round(float(100*np.std(np.array(mi_F1s)) ),2),
-    })
-    wandb.finish()
+    #wandb.log({"macro-f1_total_mean":round(float(100*np.mean(np.array(ma_F1s)) ),2) ,
+    #"macro-f1_total_std":round(float(100*np.std(np.array(ma_F1s)) ),2) ,
+    # "micro-f1_total_mean": round(float(100*np.mean(np.array(mi_F1s)) ),2),
+    # "micro-f1_total_std": round(float(100*np.std(np.array(mi_F1s)) ),2),
+    #})
+    #wandb.finish()
     vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(ma_F1s)) ),2),name="macro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(ma_F1s)) ),2),name="macro-f1-std");vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(mi_F1s)) ),2),name="micro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(mi_F1s)) ),2),name="micro-f1-std")
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info);#print(net) if args.verbose=="True" else None
@@ -636,6 +655,21 @@ def run_model_DBLP(trial=None):
     #print(optimizer) if args.verbose=="True" else None
 
     if args.get_out=="True":
+
+        if args.net=="slotGAT":
+            for i in range(num_layers):
+                for head in range(num_heads):
+                    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
+                    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_head,bins=10,range=(0,1))[0])]
+                    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_head_{head}")
+                for etype in range(num_etype):
+                    attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
+                    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
+                    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
+
+
+
+
         """out_fn=os.path.join("analysis",args.study_name+".out")
         logits_save=logits_save.cpu().numpy()
         np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)"""
@@ -646,6 +680,8 @@ def run_model_DBLP(trial=None):
         if not os.path.exists(f"./analysis/{args.study_name}"):
             os.mkdir(f"./analysis/{args.study_name}")
         vis_data_saver.save(os.path.join(f"./analysis/{args.study_name}",args.study_name+".visdata"))
+
+
         
 
 
