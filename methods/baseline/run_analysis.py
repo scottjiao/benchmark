@@ -78,6 +78,7 @@ ap.add_argument('--verbose', type=str, default="False")
 ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
 ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
 ap.add_argument('--slot_aggregator', type=str, default="average")
+ap.add_argument('--attention_average', type=str, default="False")
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
@@ -179,7 +180,7 @@ def run_model_DBLP(trial=None):
         ae_layer=args.ae_layer
         ae_sampling_factor=args.ae_sampling_factor
         delete_type_nodes=args.delete_type_nodes
-
+        attention_average=args.attention_average
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -318,11 +319,12 @@ def run_model_DBLP(trial=None):
         e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
         with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.eft","wb") as f:
             pickle.dump(e_feat,f)
+        g.etype_ids=etype_ids
 
 
 
         loss = nn.BCELoss() if multi_labels else F.nll_loss
-        #g.edge_type_indexer=F.one_hot(e_feat).to(device)
+        g.edge_type_indexer=F.one_hot(e_feat).to(device)
 
         """if os.path.exists(f"./temp/{args.dataset}.nec"):
             with open(f"./temp/{args.dataset}.nec","rb") as f:
@@ -379,7 +381,7 @@ def run_model_DBLP(trial=None):
     ma_F1s=[]
     mi_F1s=[]
     val_accs=[]
-    val_losses=[]
+    val_losses_neg=[]
     #wandb.init(project=args.study_name, 
     #        name=f"trial_num_{trial.number}",
     #        # Track hyperparameters and run metadata
@@ -425,7 +427,7 @@ def run_model_DBLP(trial=None):
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         elif args.net=='slotGAT':
             GNN=slotGAT
-            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
@@ -600,8 +602,8 @@ def run_model_DBLP(trial=None):
             
             score=sum(val_accs)/len(val_accs)
         else:
-            val_losses.append(val_loss)
-            score=sum(val_losses)/len(val_losses)
+            val_losses_neg.append(1/(1+val_loss))
+            score=sum(val_losses_neg)/len(val_losses_neg)
         trial.report(score, re)
         # Handle pruning based on the intermediate value.
         if trial.should_prune():

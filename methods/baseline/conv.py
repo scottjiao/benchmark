@@ -229,7 +229,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row"):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False"):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -247,6 +247,7 @@ class slotGATConv(nn.Module):
         self.semantic_trans=semantic_trans
         self.semantic_trans_normalize=semantic_trans_normalize
         self.attentions=None
+        self.attention_average=attention_average
 
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
@@ -430,7 +431,12 @@ class slotGATConv(nn.Module):
                 graph.dstdata.update({'er': er})
                 graph.edata.update({'ee': ee})
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
-                e = self.leaky_relu(graph.edata.pop('e')+graph.edata.pop('ee'))
+                e=graph.edata.pop('e')
+                if self.attention_average=="True":
+                    graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
+                    e_reverse=graph.edata.pop('e_reverse')
+                    e[graph.etype_ids[1]]=(e[graph.etype_ids[1]]+e_reverse[graph.etype_ids[1]])/2
+                e = self.leaky_relu(e+graph.edata.pop('ee'))
             # compute softmax
             graph.edata['a'] = self.attn_drop(edge_softmax(graph, e))
             if res_attn is not None:
