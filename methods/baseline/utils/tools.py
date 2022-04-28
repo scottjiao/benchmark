@@ -12,6 +12,40 @@ import copy
 import json
 import pickle
 
+
+
+
+class Dict(dict):
+    __setattr__ = dict.__setitem__
+    __getattr__ = dict.__getitem__
+
+def Dict_align(d1,d2):
+    for k,v in d2.items():
+        if k not in d1.keys():
+            raise Exception("Strange Args Met")
+        if type(v)!=type(d1[k]):
+            raise Exception("Not the same type for values")
+        if type(v)==Dict or type(v)==dict:
+            Dict_align(d1[k],v)
+        else:
+            d1[k]=v
+        
+
+
+def dict2obj(dictObj):
+    if not isinstance(dictObj, dict):
+        return dictObj
+    d = Dict()
+    for k, v in dictObj.items():
+        d[k] = dict2obj(v)
+    return d
+
+
+
+
+
+
+
 def func_args_parse(*args,**kargs):
     return args,kargs
 

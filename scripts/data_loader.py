@@ -19,9 +19,9 @@ class bcolors:
 
 
 class data_loader:
-    def __init__(self, path,delete_type_nodes="None"):
-        if delete_type_nodes=="None":
-            self.delete_type_nodes=None
+    def __init__(self, path,delete_type_nodes=""):
+        if delete_type_nodes=="":
+            self.delete_type_nodes=""
         else:
             self.delete_type_nodes=int(delete_type_nodes)
         self.path = path
@@ -264,8 +264,6 @@ class data_loader:
             for line in f:
                 th = line.split('\t')
                 h_id, t_id, r_id, link_weight = int(th[0]), int(th[1]), int(th[2]), float(th[3])
-                
-                #if h_type!=self.delete_type_nodes and t_type!=self.delete_type_nodes:
                 if h_id in self.old_to_new_id_mapping.keys() and t_id in self.old_to_new_id_mapping.keys() :
                     h_id=self.old_to_new_id_mapping[h_id]
                     t_id=self.old_to_new_id_mapping[t_id]
@@ -350,7 +348,7 @@ class data_loader:
         #type_id mapping
         temp_count=Counter()
         for k in nodes['count']:
-            if self.delete_type_nodes!=None and k>self.delete_type_nodes:
+            if self.delete_type_nodes!="" and k>self.delete_type_nodes:
                 temp_count[k-1]=nodes['count'][k]
             else:
                 temp_count[k]=nodes['count'][k]
