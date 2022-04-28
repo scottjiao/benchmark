@@ -432,11 +432,12 @@ class slotGATConv(nn.Module):
                 graph.edata.update({'ee': ee})
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
                 e=graph.edata.pop('e')
+                e=e+graph.edata.pop('ee')
                 if self.attention_average=="True":
                     graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
                     e_reverse=graph.edata.pop('e_reverse')
                     e[graph.etype_ids[1]]=(e[graph.etype_ids[1]]+e_reverse[graph.etype_ids[1]])/2
-                e = self.leaky_relu(e+graph.edata.pop('ee'))
+                e = self.leaky_relu(e)
             # compute softmax
             graph.edata['a'] = self.attn_drop(edge_softmax(graph, e))
             if res_attn is not None:

@@ -38,6 +38,7 @@ feature_usage_dict={0:"loaded features",
 }
 
 ap = argparse.ArgumentParser(description='MRGNN testing for the DBLP dataset')
+ap.add_argument('--json', type=str, default="")
 ap.add_argument('--feats-type', type=int, default=0,
                 help='Type of the node features used. ' +
                         '0 - loaded features; ' +
