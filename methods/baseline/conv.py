@@ -11,7 +11,7 @@ from dgl.nn.pytorch.utils import Identity
 from dgl.utils import expand_as_pair
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 # pylint: disable=W0235
 class slotGCNConv(nn.Module):
     
@@ -229,7 +229,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False"):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -248,6 +248,8 @@ class slotGATConv(nn.Module):
         self.semantic_trans_normalize=semantic_trans_normalize
         self.attentions=None
         self.attention_average=attention_average
+        self.attention_mse_sampling_factor=attention_mse_sampling_factor
+        self.attention_mse_weight_factor=attention_mse_weight_factor
 
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
@@ -431,14 +433,37 @@ class slotGATConv(nn.Module):
                 graph.dstdata.update({'er': er})
                 graph.edata.update({'ee': ee})
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
-                e=graph.edata.pop('e')
-                if self.attention_average=="True":
-                    graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
-                    e_reverse=graph.edata.pop('e_reverse')
-                    e[graph.etype_ids[1]]=(e[graph.etype_ids[1]]+e_reverse[graph.etype_ids[1]])/2
-                e = self.leaky_relu(e+graph.edata.pop('ee'))
+                e_=graph.edata.pop('e')
+                ee=graph.edata.pop('ee')
+                e=e_+ee
+                
+                e = self.leaky_relu(e)
             # compute softmax
-            graph.edata['a'] = self.attn_drop(edge_softmax(graph, e))
+            a=self.attn_drop(edge_softmax(graph, e))
+            if self.attention_average=="True":
+                graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
+                e_reverse=graph.edata.pop('e_reverse')
+                e_reverse=e_reverse+ee
+                e_reverse = self.leaky_relu(e_reverse)
+                
+                a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
+
+                a[graph.etype_ids[1]]=(a[graph.etype_ids[1]]+a_reverse[graph.etype_ids[1]])/2
+            if self.attention_mse_sampling_factor>0:
+                graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
+                e_reverse=graph.edata.pop('e_reverse')
+                e_reverse=e_reverse+ee
+                e_reverse = self.leaky_relu(e_reverse)
+                a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
+                #choosed_nodes_indices= torch.randperm(len(graph.etype_ids[1]))[:int(len(graph.etype_ids[1])*self.attention_mse_sampling_factor)]
+                choosed_edges=np.random.choice(graph.etype_ids[1],int(len(graph.etype_ids[1])*self.attention_mse_sampling_factor), replace=False)
+                #choosed_nodes=graph.etype_ids[1][choosed_nodes_indices]
+                mse=torch.mean((a[choosed_edges]-a_reverse[choosed_edges])**2,dim=[0,1,2])
+                self.mse=mse
+
+            #print("a mean",[round(a[graph.etype_ids[i]].mean().item(),3) for i in range(7)],"a_reverse mean",[round(a_reverse[graph.etype_ids[i]].mean().item(),3) for i in range(7)])
+
+            graph.edata['a'] = a
             if res_attn is not None:
                 graph.edata['a'] = graph.edata['a'] * (1-self.alpha) + res_attn * self.alpha
             # then message passing
