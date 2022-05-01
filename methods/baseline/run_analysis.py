@@ -246,7 +246,7 @@ def run_model_DBLP(trial=None):
 
         device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
         features_list = [mat2tensor(features).to(device) for features in features_list]
-        if args.selection_weight_average=="True":
+        if args.selection_weight_average==True:
             assert feats_type==0 
         if feats_type == 0:
             in_dims = [features.shape[1] for features in features_list]
@@ -441,9 +441,9 @@ def run_model_DBLP(trial=None):
 
         selection_types=args.selection_types
 
-        if args.selection_weight_average=="True":
+        if args.selection_weight_average==True:
             net_wrapper=multi_feat_net
-        elif args.selection_weight_average=="False":
+        elif args.selection_weight_average==False:
             net_wrapper=single_feat_net
 
         t_re0=time.time()
@@ -499,8 +499,8 @@ def run_model_DBLP(trial=None):
 
         net=net_wrapper(selection_types,features_list,GNN,*fargs,**fkargs)
             
-        print(f"model using: {net.__class__.__name__}")  if args.verbose=="True" else None
-        #print(net)  if args.verbose=="True" else None
+        print(f"model using: {net.__class__.__name__}")  if args.verbose==True else None
+        #print(net)  if args.verbose==True else None
         #net=HeteroCGNN(g=g,num_etype=num_etype,num_ntypes=num_ntypes,num_layers=num_layers,hiddens=hiddens,dropout=args.dropout,num_classes=num_classes,bias=args.bias,activation=activation,com_dim=com_dim,ntype_dims=ntype_dims,L2_norm=L2_norm,negative_slope=args.slope,num_heads=num_heads)
         net.to(device)
         if net in ['GTN','slotGTN']:
@@ -517,7 +517,7 @@ def run_model_DBLP(trial=None):
                                             {'params':ad_list,"lr":lr_times_on_filter_GTN*lr,"weight_decay":weight_decay},])
         elif net=="LabelPropagation":
             pass
-        elif args.selection_weight_average=="True":
+        elif args.selection_weight_average==True:
             ad_list=[]
             other_list=[]
             for pname, p in net.named_parameters():
@@ -532,7 +532,7 @@ def run_model_DBLP(trial=None):
         else:
             optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
 
-        #print(optimizer) if args.verbose=="True" else None
+        #print(optimizer) if args.verbose==True else None
         # training loop
         net.train()
         t=time.localtime()
@@ -560,11 +560,11 @@ def run_model_DBLP(trial=None):
             train_loss = loss(logp[train_idx], labels[train_idx]) if not multi_labels else loss(logp[train_idx], labels[train_idx])
             
             #autoencoder for ntype
-            if ae_layer!="None":
+            if ae_layer!="":
                 if "decoder" not in dec_dic.keys():
                     dec_dic["decoder"]=NTYPE_ENCODER(in_dim=encoded_embeddings.shape[1],hidden_dim=hidden_dim,out_dim=num_ntypes,dropout=args.dropout).to(device)
                     
-                    print(dec_dic["decoder"])  if args.verbose=="True" else None
+                    print(dec_dic["decoder"])  if args.verbose==True else None
                 ntype_decoder=dec_dic["decoder"]
                 
                 #produce ntype logits
@@ -603,11 +603,11 @@ def run_model_DBLP(trial=None):
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
                 #wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
                 print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
-                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
-            if args.get_out=="True":
-                if args.selection_weight_average=="True":
+                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose==True and epoch%5==0) else None
+            if args.get_out==True:
+                if args.selection_weight_average==True:
                     w=net.W.flatten(0).cpu().tolist()
-                    if args.verbose=="True":
+                    if args.verbose==True:
                         print(w)
                     vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
                     vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
@@ -652,15 +652,15 @@ def run_model_DBLP(trial=None):
             logits,_ = net(features_list, e_feat) if net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             if re==0:
                 logits_save=logits
-                featW=net.W.flatten(0).cpu().tolist() if args.selection_weight_average=="True" else None
+                featW=net.W.flatten(0).cpu().tolist() if args.selection_weight_average==True else None
             else:
                 logits_save=torch.cat((logits_save,logits),0)
-                featW.append(net.W.flatten(0).cpu().tolist()) if args.selection_weight_average=="True" else None
+                featW.append(net.W.flatten(0).cpu().tolist()) if args.selection_weight_average==True else None
             test_logits = logits[test_idx]
             pred = test_logits.cpu().numpy().argmax(axis=1) if not multi_labels else (test_logits.cpu().numpy()>0).astype(int)
             onehot = np.eye(num_classes, dtype=np.int32)
             dl_mode='multi' if multi_labels else 'bi'
-            if args.get_test_for_online=="True":
+            if args.get_test_for_online==True:
                 assert args.repeat==5
                 assert args.trial_num==1
                 if not os.path.exists(f"./testout/{ args.study_name.replace(args.dataset_params.dataset+'_','')}"):
@@ -668,7 +668,7 @@ def run_model_DBLP(trial=None):
                 dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"./testout/{ args.study_name.replace(args.dataset_params.dataset+'_','')}/{args.dataset_params.dataset}_{re}.txt",mode=dl_mode)
             pred = onehot[pred] if not multi_labels else  pred
             d=dl.evaluate(pred,mode=dl_mode)
-            print(d) if args.verbose=="True" else None
+            print(d) if args.verbose==True else None
 
         #wandb.log({f"macro-f1_{re}": d["macro-f1"], f"micro-f1_{re}": d["micro-f1"]})
         ma_F1s.append(d["macro-f1"])
@@ -685,11 +685,11 @@ def run_model_DBLP(trial=None):
     #wandb.finish()
     vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(ma_F1s)) ),2),name="macro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(ma_F1s)) ),2),name="macro-f1-std");vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(mi_F1s)) ),2),name="micro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(mi_F1s)) ),2),name="micro-f1-std")
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
-    print(exp_info);#print(net) if args.verbose=="True" else None
+    print(exp_info);#print(net) if args.verbose==True else None
     print(f"trial.params: {str(trial.params)}")
-    #print(optimizer) if args.verbose=="True" else None
+    #print(optimizer) if args.verbose==True else None
 
-    if args.get_out=="True":
+    if args.get_out==True:
 
         if net=="slotGAT":
             for i in range(num_layers):
@@ -708,7 +708,7 @@ def run_model_DBLP(trial=None):
         """out_fn=os.path.join("analysis",args.study_name+".out")
         logits_save=logits_save.cpu().numpy()
         np.save(out_fn, logits_save, allow_pickle=True, fix_imports=True)"""
-        #if args.selection_weight_average=="True":
+        #if args.selection_weight_average==True:
             #W_fn=os.path.join("analysis",args.study_name+".w");featW=np.array(featW);np.save(W_fn, featW, allow_pickle=True, fix_imports=True)
         if not os.path.exists(f"./analysis"):
             os.mkdir("./analysis")
@@ -732,7 +732,7 @@ def run_model_DBLP(trial=None):
     
     with open(fn,m) as f:
         
-        f.write(f"  multi_feat_weight: {str(net.W.flatten(0).cpu().tolist())} \n") if args.selection_weight_average=="True" else None
+        f.write(f"  multi_feat_weight: {str(net.W.flatten(0).cpu().tolist())} \n") if args.selection_weight_average==True else None
         f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
         f.write(str(exp_info)+"\n")
         f.write(f"trial.params: {str(trial.params)}"+"\n")

@@ -85,7 +85,7 @@ class slotGTN(nn.Module):
             deg=convs_head(ones)
             norm=torch.pow(deg,-1)
             norm[norm == float("Inf")] = 0
-            if self.normalize=="True":
+            if self.normalize==True:
                 z.append(norm*convs_head(h))
             else:
                 z.append(convs_head(h))
@@ -379,7 +379,7 @@ class slotGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False"):
+                 ae_layer,aggregator="average",semantic_trans=False,semantic_trans_normalize="row",attention_average=False):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -507,7 +507,7 @@ class attGTN(nn.Module):
             #norm=torch.pow(deg,-1)
             #norm[norm == float("Inf")] = 0
             #z.append(norm*convs_head(h))
-            if self.residual=="True":
+            if self.residual==True:
                 z.append(h+convs_head(h))
             else:
                 z.append(convs_head(h))
