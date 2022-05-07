@@ -18,6 +18,7 @@ from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
 
+from sklearn.manifold import TSNE
 #import wandb
 
 from tqdm import tqdm
@@ -540,7 +541,7 @@ def run_model_DBLP(trial=None):
                 mse+=attention_mse_weight_factor*l.mse
                 t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
                 t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
-            print(f"loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
+            print(f"Epoch:{epoch} loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
             train_loss +=mse
             train_loss +=t0_bigger_mse
             train_loss +=t1_bigger_mse
@@ -687,6 +688,10 @@ def run_model_DBLP(trial=None):
                     attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
                     vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
                 vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
+                for nt in tqdm(range(net.gat_layers[i].emb.shape[0])):
+                    x_emb=TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(net.gat_layers[i].emb[nt].squeeze(0).numpy())
+                    #vis_data_saver.collect_whole_process_tensor(  ,name=f"emb_layer_{i}")
+                    vis_data_saver.collect_whole_process( x_emb.tolist() ,name=f"tsne_emb_layer_{i}_slot_{nt}")
 
 
 

@@ -408,6 +408,7 @@ class slotGATConv(nn.Module):
                         h_src=h_src.view(-1,self._num_heads,self.num_ntype,int(self._in_src_feats/self._num_heads))
                         h_src=torch.matmul(st_m,h_src)
                     h_dst=h_src=h_src.permute(2,0,1,3).flatten(2)  #num_ntype*num_nodes*(in_feat_dim)
+                    self.emb=h_dst.cpu().detach()
                     #self.fc with num_ntype*(in_feat_dim)*(out_feats * num_heads)
                     
                     feat_src = feat_dst = torch.bmm(h_src,self.fc)  #num_ntype*num_nodes*(out_feats * num_heads)

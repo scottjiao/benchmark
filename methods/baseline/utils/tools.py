@@ -21,12 +21,15 @@ class vis_data_collector():
     #all data must be simple python objects like int or 'str'
     def __init__(self):
         self.data_dict={}
+        self.tensor_dict={}
         #formatting:
         #
         # {"meta":{****parameters and study name},"re-1":{"epoch-0":{"loss":0.1,"w1":1},"epoch-1":{"loss":0.2,"w1":2},...}}
 
     def save_meta(self,meta_data,meta_name):
         self.data_dict["meta"]={meta_name:meta_data}
+        self.data_dict["meta"]["tensor_names"]=[]
+        
 
     def collect_in_training(self,data,name,re,epoch,r=4):
         if f"re-{re}" not in self.data_dict.keys():
@@ -39,6 +42,9 @@ class vis_data_collector():
 
     def collect_whole_process(self,data,name):
         self.data_dict[name]=data
+    def collect_whole_process_tensor(self,data,name):
+        self.tensor_dict[name]=data
+        self.data_dict["meta"]["tensor_names"].append(name)
 
 
     def save(self,fn):
@@ -46,11 +52,19 @@ class vis_data_collector():
         f = open(fn+".json", 'w')
         json.dump(self.data_dict, f, indent=4)
         f.close()
+
+        for k,v in self.tensor_dict.items():
+
+            torch.save(v,fn+"_"+k+".pt")
     
     def load(self,fn):
         f = open(fn, 'r')
         self.data_dict= json.load(f)
         f.close()
+        for name in self.data_dict["meta"]["tensor_names"]:
+            self.tensor_dict[name]=torch.load(name+".pt")
+
+
 
     def trans_to_numpy(self,name,epoch_range=None):
         data=[]
