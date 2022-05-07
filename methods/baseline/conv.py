@@ -229,14 +229,14 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
         self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
         self._out_feats = out_feats
         self._allow_zero_in_degree = allow_zero_in_degree
-        self.edge_emb = nn.Embedding(num_etypes, edge_feats)
+        self.edge_emb = nn.Embedding(num_etypes, edge_feats) if edge_feats else None
         self.n_type_mappings=n_type_mappings
         self.res_n_type_mappings=res_n_type_mappings
         self.etype_specified_attention=etype_specified_attention
@@ -250,6 +250,8 @@ class slotGATConv(nn.Module):
         self.attention_average=attention_average
         self.attention_mse_sampling_factor=attention_mse_sampling_factor
         self.attention_mse_weight_factor=attention_mse_weight_factor
+        self.attention_1_type_bigger_constraint=attention_1_type_bigger_constraint
+        self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
 
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(
@@ -270,7 +272,7 @@ class slotGATConv(nn.Module):
                 self.fc =nn.ModuleList([nn.Linear(
                     self._in_src_feats, out_feats * num_heads, bias=False)  for _ in range(num_ntype)] )
                 raise Exception("!!!")"""
-        self.fc_e = nn.Linear(edge_feats, edge_feats*num_heads, bias=False)
+        self.fc_e = nn.Linear(edge_feats, edge_feats*num_heads, bias=False) if edge_feats else None
         if self.etype_specified_attention:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
@@ -278,11 +280,11 @@ class slotGATConv(nn.Module):
         elif self.aggregator=="last_fc":
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
+            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
         else:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
-            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats)))
+            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
         self.leaky_relu = nn.LeakyReLU(negative_slope)
@@ -330,8 +332,8 @@ class slotGATConv(nn.Module):
             nn.init.xavier_normal_(self.fc_dst.weight, gain=gain)
         nn.init.xavier_normal_(self.attn_l, gain=gain)
         nn.init.xavier_normal_(self.attn_r, gain=gain)
-        if not self.etype_specified_attention:
-            nn.init.xavier_normal_(self.attn_e, gain=gain)
+        if not self.etype_specified_attention and self._edge_feats:
+            nn.init.xavier_normal_(self.attn_e, gain=gain) 
         if isinstance(self.res_fc, nn.Linear):
             if self.res_n_type_mappings:
                 for m in self.res_fc:
@@ -342,8 +344,8 @@ class slotGATConv(nn.Module):
             pass
         elif isinstance(self.res_fc, nn.Parameter):
             nn.init.xavier_normal_(self.res_fc, gain=gain)
-
-        nn.init.xavier_normal_(self.fc_e.weight, gain=gain)
+        if self._edge_feats:
+            nn.init.xavier_normal_(self.fc_e.weight, gain=gain) 
 
     def set_allow_zero_in_degree(self, set_value):
         self._allow_zero_in_degree = set_value
@@ -424,43 +426,51 @@ class slotGATConv(nn.Module):
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))  #  num_edges*heads*1*num_etype
                 e=self.leaky_relu((graph.edata.pop('e')*self.eindexer).sum(-1))
             else:
-                e_feat = self.edge_emb(e_feat)
-                e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)
-                ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1)
+                e_feat = self.edge_emb(e_feat) if self._edge_feats else None
+                e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)  if self._edge_feats else None
+                ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1) if self._edge_feats else 0
                 el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
                 er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
                 graph.srcdata.update({'ft': feat_src, 'el': el})
                 graph.dstdata.update({'er': er})
-                graph.edata.update({'ee': ee})
+                graph.edata.update({'ee': ee}) if self._edge_feats else None
                 graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
                 e_=graph.edata.pop('e')
-                ee=graph.edata.pop('ee')
+                ee=graph.edata.pop('ee') if self._edge_feats else 0
                 e=e_+ee
                 
                 e = self.leaky_relu(e)
             # compute softmax
             a=self.attn_drop(edge_softmax(graph, e))
+            graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
+            e_reverse=graph.edata.pop('e_reverse')
+            e_reverse=e_reverse+ee
+            e_reverse = self.leaky_relu(e_reverse)
+            a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
             if self.attention_average=="True":
-                graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
-                e_reverse=graph.edata.pop('e_reverse')
-                e_reverse=e_reverse+ee
-                e_reverse = self.leaky_relu(e_reverse)
                 
-                a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
 
                 a[graph.etype_ids[1]]=(a[graph.etype_ids[1]]+a_reverse[graph.etype_ids[1]])/2
             if self.attention_mse_sampling_factor>0:
-                graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
-                e_reverse=graph.edata.pop('e_reverse')
-                e_reverse=e_reverse+ee
-                e_reverse = self.leaky_relu(e_reverse)
-                a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
                 #choosed_nodes_indices= torch.randperm(len(graph.etype_ids[1]))[:int(len(graph.etype_ids[1])*self.attention_mse_sampling_factor)]
                 choosed_edges=np.random.choice(graph.etype_ids[1],int(len(graph.etype_ids[1])*self.attention_mse_sampling_factor), replace=False)
                 #choosed_nodes=graph.etype_ids[1][choosed_nodes_indices]
                 mse=torch.mean((a[choosed_edges]-a_reverse[choosed_edges])**2,dim=[0,1,2])
                 self.mse=mse
-
+                
+            else:
+                self.mse=torch.tensor(0)
+            if self.attention_1_type_bigger_constraint>0:
+                self.t1_bigger_mse=torch.mean((1-a[graph.etype_ids[1]])**2,dim=[0,1,2])
+            else:
+                self.t1_bigger_mse=torch.tensor(0)
+            if self.attention_0_type_bigger_constraint>0:
+                self.t0_bigger_mse=torch.mean((1-a[graph.etype_ids[0]])**2,dim=[0,1,2])
+            else:
+                self.t0_bigger_mse=torch.tensor(0)
+            cor_vec=torch.stack([a[graph.etype_ids[1]].flatten(),a_reverse[graph.etype_ids[1]].flatten()],dim=0)
+            self.attn_correlation=np.corrcoef(cor_vec.detach().cpu())[0,1]
+            
             #print("a mean",[round(a[graph.etype_ids[i]].mean().item(),3) for i in range(7)],"a_reverse mean",[round(a_reverse[graph.etype_ids[i]].mean().item(),3) for i in range(7)])
 
             graph.edata['a'] = a

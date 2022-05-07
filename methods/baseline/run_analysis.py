@@ -81,6 +81,8 @@ ap.add_argument('--slot_aggregator', type=str, default="average")
 ap.add_argument('--attention_average', type=str, default="False")
 ap.add_argument('--attention_mse_sampling_factor', type=float, default=0)  
 ap.add_argument('--attention_mse_weight_factor', type=float, default=0)  
+ap.add_argument('--attention_1_type_bigger_constraint', type=float, default=0)
+ap.add_argument('--attention_0_type_bigger_constraint', type=float, default=0)  
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
@@ -185,6 +187,8 @@ def run_model_DBLP(trial=None):
         attention_average=args.attention_average
         attention_mse_sampling_factor=args.attention_mse_sampling_factor
         attention_mse_weight_factor=args.attention_mse_weight_factor
+        attention_1_type_bigger_constraint=args.attention_1_type_bigger_constraint
+        attention_0_type_bigger_constraint=args.attention_0_type_bigger_constraint
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -431,7 +435,7 @@ def run_model_DBLP(trial=None):
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
         elif args.net=='slotGAT':
             GNN=slotGAT
-            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor)
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
@@ -530,10 +534,16 @@ def run_model_DBLP(trial=None):
             logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
             train_loss = loss(logp[train_idx], labels[train_idx]) if not multi_labels else loss(logp[train_idx], labels[train_idx])
             mse=0
+            t0_bigger_mse=0
+            t1_bigger_mse=0
             for l in net.gat_layers:
                 mse+=attention_mse_weight_factor*l.mse
-            print(f"loss: {train_loss.item()}, attention mse: {mse.item()}") if args.verbose=="True" else None
+                t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
+                t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
+            print(f"loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
             train_loss +=mse
+            train_loss +=t0_bigger_mse
+            train_loss +=t1_bigger_mse
             #autoencoder for ntype
             if ae_layer!="None":
                 if "decoder" not in dec_dic.keys():
@@ -676,6 +686,7 @@ def run_model_DBLP(trial=None):
                     attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
                     attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
                     vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
+                vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
 
 
 

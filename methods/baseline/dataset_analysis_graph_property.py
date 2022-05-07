@@ -162,28 +162,47 @@ def analysis(dataset,net,get_logits_way="average"):
     val_idx = np.sort(val_idx)
     test_idx = train_val_test_idx['test_idx']
     test_idx = np.sort(test_idx)
-
-    if os.path.exists(f"./temp/{dataset}.ett"):
-        with open(f"./temp/{dataset}.ett","rb") as f:
-            edge2type=pickle.load(f)
-    else:
-        edge2type = {}
-        for k in dl.links['data']:
-            for u,v in zip(*dl.links['data'][k].nonzero()):
-                edge2type[(u,v)] = k
-        for i in range(dl.nodes['total']):
-            if (i,i) not in edge2type:
-                edge2type[(i,i)] = len(dl.links['count'])
-        count=1
-        for k in dl.links['data']:
-            for u,v in zip(*dl.links['data'][k].nonzero()):
-                if (v,u) not in edge2type:
-                    edge2type[(v,u)] = count+1+len(dl.links['count'])
-                    count+=1
-
-        #this operation will make gap of etype ids.
-        with open(f"./temp/{dataset}.ett","wb") as f:
-            pickle.dump(edge2type,f)
+    edge2type = {}
+    deg_dist_by_edge_type={}
+    for k in dl.links['data']:
+        deg_dist_by_edge_type[f"{k}_out"]={}
+        deg_dist_by_edge_type[f"{k}_in"]={}
+        for u,v in zip(*dl.links['data'][k].nonzero()):
+            edge2type[(u,v)] = k
+            if u not in deg_dist_by_edge_type[f"{k}_out"]:
+                deg_dist_by_edge_type[f"{k}_out"][u]=0
+            if v not in deg_dist_by_edge_type[f"{k}_in"]:
+                deg_dist_by_edge_type[f"{k}_in"][v]=0
+            deg_dist_by_edge_type[f"{k}_out"][u]+=1
+            deg_dist_by_edge_type[f"{k}_in"][v]+=1
+    count_self=0
+    for i in range(dl.nodes['total']):
+        FLAG=0
+        if (i,i) not in edge2type:
+            edge2type[(i,i)] = len(dl.links['count'])
+            FLAG=1
+    count_self+=FLAG
+    count_reverse=0
+    for k in dl.links['data']:
+        FLAG=0
+        for u,v in zip(*dl.links['data'][k].nonzero()):
+            if (v,u) not in edge2type:
+                edge2type[(v,u)] = count+1+len(dl.links['count'])
+                FLAG=1
+                et=count+1+len(dl.links['count'])
+                if u not in deg_dist_by_edge_type[f"{et}_out"]:
+                    deg_dist_by_edge_type[f"{et}_out"][u]=0
+                if v not in deg_dist_by_edge_type[f"{et}_in"]:
+                    deg_dist_by_edge_type[f"{et}_in"][v]=0
+                deg_dist_by_edge_type[f"{et}_out"][u]+=1
+                deg_dist_by_edge_type[f"{et}_in"][v]+=1
+        count_reverse+=FLAG
+    num_etype=len(dl.links['count'])+count_self+count_reverse
+    #this operation will make gap of etype ids.
+    #with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett","wb") as f:
+        #pickle.dump(edge2type,f)
+        #pass
+            
         
 
 
@@ -192,25 +211,20 @@ def analysis(dataset,net,get_logits_way="average"):
     g = dgl.add_self_loop(g)
     g = g.to(device)
     #reorganize the edge ids
-    if os.path.exists(f"./temp/{dataset}.eft"):
-        with open(f"./temp/{dataset}.eft","rb") as f:
-            e_feat=pickle.load(f)
-    else:
-        e_feat = []
-        count=0
-        count_mappings={}
-        counted_dict={}
-        for u, v in zip(*g.edges()):
-            u = u.cpu().item()
-            v = v.cpu().item()
-            if not counted_dict.setdefault(edge2type[(u,v)],False) :
-                count_mappings[edge2type[(u,v)]]=count
-                counted_dict[edge2type[(u,v)]]=True
-                count+=1
-            e_feat.append(count_mappings[edge2type[(u,v)]])
-        e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
-        with open(f"./temp/{dataset}.eft","wb") as f:
-            pickle.dump(e_feat,f)
+    
+    e_feat = []
+    count=0
+    count_mappings={}
+    counted_dict={}
+    for u, v in zip(*g.edges()):
+        u = u.cpu().item()
+        v = v.cpu().item()
+        if not counted_dict.setdefault(edge2type[(u,v)],False) :
+            count_mappings[edge2type[(u,v)]]=count
+            counted_dict[edge2type[(u,v)]]=True
+            count+=1
+        e_feat.append(count_mappings[edge2type[(u,v)]])
+    e_feat = torch.tensor(e_feat, dtype=torch.long).to(device)
 
 
 
@@ -265,7 +279,7 @@ def analysis(dataset,net,get_logits_way="average"):
     #print(exp_info)
 
 
-    """
+    
     #edge density
     edgeDens=adjM.nnz/(adjM.shape[0])**2
     print(f"edge density: {edgeDens}")
@@ -275,6 +289,8 @@ def analysis(dataset,net,get_logits_way="average"):
     def count_hist(input):
         #input must be int numbers
         m=max(input)
+        if m<20:
+            m=20
         x=torch.zeros([m+1])
         for i in input:
             x[i]+=1
@@ -284,13 +300,29 @@ def analysis(dataset,net,get_logits_way="average"):
     print(f"degree dist of top 20 :{dist_deg[:20]}")
     plt.title("degree distribution from deg 1 to deg 20")
     plt.plot(list(range(20)),dist_deg[:20])
-
     x_l=MultipleLocator(1)
     ax=plt.gca()
     ax.xaxis.set_major_locator(x_l)
     plt.xlim(-0.5,20.5)
     plt.savefig(f"deg_{dataset}")
+
+    for k,v in deg_dist_by_edge_type.items():
+        et_dir=k
+        dist_deg=count_hist(list(v.values()))
+        plt.title(f"degree distribution of et {et_dir} from deg 1 to deg 20")
+        plt.plot(list(range(20)),dist_deg[:20])
+        x_l=MultipleLocator(1)
+        ax=plt.gca()
+        ax.xaxis.set_major_locator(x_l)
+        plt.xlim(-0.5,20.5)
+        plt.savefig(f"./dataset_analysis/deg_{dataset}_{et_dir}")
+        plt.cla()
+
+
+
+
     #spectrum of laplacian
+
 
     #spectrum=networkx.linalg.spectrum.laplacian_spectrum(netx_g)
     #print(f"Top 5 of spectrum are {spectrum[0:5]}, and the last 5 are {spectrum[-5:-1]}")
@@ -334,13 +366,13 @@ def analysis(dataset,net,get_logits_way="average"):
                 label_of_node=labels[node]
                 ratio+=((labels_of_neighbors==label_of_node).int().sum())/(len(labels_of_neighbors))
         ratio=ratio/len(labeled_idx)
-        print(f"homophily ratio of {k}-order: {ratio}")"""
+        print(f"homophily ratio of {k}-order: {ratio}")
     print("*"*20)
     print(dataset,net)
     print("*"*20)
-    #get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2)
+    get_hetero_distribution(dataset,labeled_idx,netx_g,labels,k=2)
 
-    node_num=adjM.shape[0]
+    """node_num=adjM.shape[0]
     if get_logits_way=="average":
         logits_cum=torch.from_numpy(np.load(f"./analysis/get_best_outs_{dataset}_net_{net}.out.npy"))
         logits_cum=F.softmax(logits_cum,dim=1)
@@ -483,15 +515,21 @@ def analysis(dataset,net,get_logits_way="average"):
 
     
     vis("all",labeled_idx)
-    vis("test",test_idx)
+    vis("test",test_idx)"""
 
 
 
 
-for dataset in ["pubmed_HNE_complete",
-                        "DBLP_GTN",
-                        "ACM_GTN",
-                        "IMDB_GTN",]:
-    for net in ["slotGTN"]:
+#for dataset in ["pubmed_HNE_complete",
+#                        "DBLP_GTN",
+#                        "ACM_GTN",
+#                        "IMDB_GTN",]:
+#    for net in ["slotGTN"]:
+#        analysis(dataset,net)
+#analysis("pubmed_HNE_complete","LabelPropagation")
+
+for dataset in [
+                        "IMDB_corrected",]:
+    for net in ["slotGAT"]:
         analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")
