@@ -284,7 +284,7 @@ def run_model_DBLP(trial=None):
             FLAG=0
             for u,v in zip(*dl.links['data'][k].nonzero()):
                 if (v,u) not in edge2type:
-                    edge2type[(v,u)] = count+1+len(dl.links['count'])
+                    edge2type[(v,u)] = count_reverse+1+len(dl.links['count'])
                     FLAG=1
             count_reverse+=FLAG
         num_etype=len(dl.links['count'])+count_self+count_reverse
@@ -354,6 +354,7 @@ def run_model_DBLP(trial=None):
         #num_layers=len(hiddens)-1
         num_nodes=dl.nodes['total']
         g.node_idx_by_ntype=[]
+        g.num_ntypes=num_ntypes
         g.node_ntype_indexer=torch.zeros(num_nodes,num_ntypes).to(device)
         ntype_dims=[]
         idx_count=0
@@ -534,17 +535,18 @@ def run_model_DBLP(trial=None):
             logits,encoded_embeddings = net(features_list, e_feat) 
             logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
             train_loss = loss(logp[train_idx], labels[train_idx]) if not multi_labels else loss(logp[train_idx], labels[train_idx])
-            mse=0
-            t0_bigger_mse=0
-            t1_bigger_mse=0
-            for l in net.gat_layers:
-                mse+=attention_mse_weight_factor*l.mse
-                t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
-                t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
-            print(f"Epoch:{epoch} loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
-            train_loss +=mse
-            train_loss +=t0_bigger_mse
-            train_loss +=t1_bigger_mse
+            if attention_mse_weight_factor>0 or attention_1_type_bigger_constraint>0 or attention_0_type_bigger_constraint>0:
+                mse=0
+                t0_bigger_mse=0
+                t1_bigger_mse=0
+                for l in net.gat_layers:
+                    mse+=attention_mse_weight_factor*l.mse
+                    t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
+                    t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
+                print(f"Epoch:{epoch} loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
+                train_loss +=mse
+                train_loss +=t0_bigger_mse
+                train_loss +=t1_bigger_mse
             #autoencoder for ntype
             if ae_layer!="None":
                 if "decoder" not in dec_dic.keys():
@@ -706,6 +708,7 @@ def run_model_DBLP(trial=None):
         if not os.path.exists(f"./analysis/{args.study_name}"):
             os.mkdir(f"./analysis/{args.study_name}")
         vis_data_saver.save(os.path.join(f"./analysis/{args.study_name}",args.study_name+".visdata"))
+        vis_data_saver.visualize_tsne(dn=f"./analysis/{args.study_name}",node_idx_by_ntype=g.node_idx_by_ntype)
 
 
         

@@ -5,13 +5,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, normalized_mutual_info_score, adjusted_rand_score
 from sklearn.cluster import KMeans
 from sklearn.svm import LinearSVC
-
+import os
 import torch.nn.functional as F
 import torch.nn as nn
 import copy
 import json
 import pickle
-
+from matplotlib import pyplot as plt
 def func_args_parse(*args,**kargs):
     return args,kargs
 
@@ -76,6 +76,56 @@ class vis_data_collector():
             re+=1
         data=np.array(data)
         return np.mean(data,axis=0),np.std(data,axis=0)
+
+    def visualize_tsne(self,dn,node_idx_by_ntype):
+        from matplotlib.pyplot import figure
+
+        figure(figsize=(16, 9), dpi=80)
+        ncs=["r","b","y","g","chocolate","deeppink"]
+        print(dn)
+        layers=[]
+        heads=[]
+        ets=[]
+        for k,v in self.data_dict.items():
+            if "attention_hist_layer" in k:
+                temp=k.split("_")
+                if int(temp[3]) not in layers:
+                    layers.append(int(temp[3]))
+                if temp[4]=="head":
+                    if int(temp[5]) not in heads:
+                        heads.append(int(temp[5]))
+                if temp[4]=="et":
+                    if int(temp[5]) not in ets:
+                        ets.append(int(temp[5]))
+        layers,heads,ets=sorted(layers),sorted(heads),sorted(ets)
+        #print(layers,heads,ets)
+        #heads plot
+        for layer in layers:
+            fig,ax=plt.subplots(2,int((len(node_idx_by_ntype)+1)/2))
+            fig.set_size_inches(16,9)
+            fig.set_dpi(100)
+            nts=list(range(len(node_idx_by_ntype)))
+            for nt in nts:
+                subax=ax[int((nt)/(len(nts)/2))][int((nt)%(len(nts)/2))]
+                subax.cla()
+                datas=np.array(self.data_dict[f"tsne_emb_layer_{layer}_slot_{nt}"]).T
+                print(datas.shape)
+                for nt_j in nts:
+                    x=datas[0][ node_idx_by_ntype[nt_j]]
+                    y=datas[1][ node_idx_by_ntype[nt_j]]
+                    subax.scatter(x=x,y=y,c=ncs[nt_j],s=0.1,label=f"type {nt_j} with center ({np.mean(x):.2f},{np.mean(y):.2f}) and radius {(np.std(x)+np.std(y))/2:.2f}")
+                subax.set_xlim(-100,100)
+                subax.set_ylim(-100,100)
+                subax.set_title(f"layer_{layer}_slot_{nt}")
+                plt.title(f"layer_{layer}_slot_{nt}")
+                lgnd=subax.legend()
+                for lh in lgnd.legendHandles:
+                    lh._sizes=[10]
+            fig.suptitle(f"embedding_tsne_layer_{layer}")
+            plt.savefig(os.path.join(dn,f"slot_embeddings_layer_{layer}.png"))
+
+
+
                 
                     
 

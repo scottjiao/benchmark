@@ -11,6 +11,7 @@ import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
+from utils.tools import vis_data_collector
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN
 import dgl
@@ -18,6 +19,7 @@ from matplotlib import pyplot as plt
 from matplotlib.pyplot import MultipleLocator
 import networkx
 from sklearn.metrics import f1_score
+import json
 
 feature_usage_dict={0:"loaded features",
 1:"only target node features (zero vec for others)",
@@ -265,7 +267,9 @@ def analysis(dataset,net,get_logits_way="average"):
         ntype_dims.append(feature.shape[1])
         ntype_count+=1
     ntypes=g.node_ntype_indexer.argmax(1)
-
+    f = open("./analysis/"+f"dataset_info_{dataset}"+".json", 'w')
+    json.dump({"node_idx_by_ntype":g.node_idx_by_ntype}, f, indent=4)
+    f.close()
     eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
     ntype_indexer=g.node_ntype_indexer
 
@@ -529,7 +533,7 @@ def analysis(dataset,net,get_logits_way="average"):
 #analysis("pubmed_HNE_complete","LabelPropagation")
 
 for dataset in [
-                        "IMDB_corrected",]:
+                        "IMDB_corrected_oracle","IMDB_corrected",]:
     for net in ["slotGAT"]:
         analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")

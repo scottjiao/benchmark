@@ -414,7 +414,8 @@ class slotGAT(nn.Module):
             num_hidden* heads[-2] , num_classes, heads[-1],
             feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregator=aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint))
         self.aggregator=aggregator
-        assert aggregator in ["onedimconv","average","last_fc"]
+        self.by_slot=[f"by_slot_{nt}" for nt in range(g.num_ntypes)]
+        assert aggregator in (["onedimconv","average","last_fc"]+self.by_slot)
         if self.aggregator=="onedimconv":
             self.nt_aggr=nn.Parameter(torch.FloatTensor(1,1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
@@ -443,6 +444,8 @@ class slotGAT(nn.Module):
         elif self.aggregator=="onedimconv":
             logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
         elif self.aggregator=="last_fc":
+            logits=logits
+        elif self.aggregator in self.by_slot:
             logits=logits
         else:
             raise NotImplementedError()

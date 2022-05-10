@@ -277,11 +277,12 @@ class slotGATConv(nn.Module):
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
 
-        elif self.aggregator=="last_fc":
+        elif self.aggregator=="last_fc" or (self.aggregator and "by_slot" in self.aggregator):
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
             self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
         else:
+            
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
@@ -366,13 +367,13 @@ class slotGATConv(nn.Module):
                                    'suppress the check and let the code run.')
 
             if isinstance(feat, tuple):
+                raise Exception("!!!")
                 h_src = self.feat_drop(feat[0])
                 h_dst = self.feat_drop(feat[1])
                 if not hasattr(self, 'fc_src'):
                     self.fc_src, self.fc_dst = self.fc, self.fc
                 feat_src = self.fc_src(h_src).view(-1, self._num_heads, self._out_feats)
                 feat_dst = self.fc_dst(h_dst).view(-1, self._num_heads, self._out_feats)
-                raise Exception("!!!")
             else:
                 if self.semantic_trans=="True":
                     if self.semantic_trans_normalize=="row":
@@ -382,7 +383,6 @@ class slotGATConv(nn.Module):
                     st_m= F.softmax( self.semantic_transition_matrix,dim=dim_flag ).unsqueeze(0).unsqueeze(0)
                     #st_m= F.softmax( torch.randn_like(self.semantic_transition_matrix),dim=dim_flag ).unsqueeze(0).unsqueeze(0)# ruin exp!!! 
                     #st_m= torch.zeros_like(self.semantic_transition_matrix).unsqueeze(0).unsqueeze(0)# ruin exp!!! 
-                    
                 elif self.semantic_trans=="False":
                     st_m=torch.eye(self.num_ntype).to(self.semantic_transition_matrix.device)
                 #feature transformation first
@@ -400,6 +400,8 @@ class slotGATConv(nn.Module):
                     h_src=h_src.flatten(1)
 
                     feat_src = feat_dst = torch.mm(h_src,self.fc).view(-1,1,self._out_feats)
+
+
                 else:
                     if self.inputhead:
                         h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
@@ -411,9 +413,16 @@ class slotGATConv(nn.Module):
                     self.emb=h_dst.cpu().detach()
                     #self.fc with num_ntype*(in_feat_dim)*(out_feats * num_heads)
                     
-                    feat_src = feat_dst = torch.bmm(h_src,self.fc)  #num_ntype*num_nodes*(out_feats * num_heads)
-                    feat_src = feat_dst =feat_src.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
-                        -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                    feat_dst = torch.bmm(h_src,self.fc)  #num_ntype*num_nodes*(out_feats * num_heads)
+                    
+                    if self.aggregator and "by_slot" in self.aggregator:
+                        target_slot=int(self.aggregator.split("_")[2])
+                        feat_src = feat_dst =feat_dst[target_slot,:,:].unsqueeze(1)
+                    else:
+                        feat_src = feat_dst =feat_dst.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                            -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                    
+
 
 
                 if graph.is_block:
@@ -489,8 +498,12 @@ class slotGATConv(nn.Module):
                         if self.aggregator=="last_fc":
                             resval =torch.mm(h_src,self.res_fc).view(-1,1,self._out_feats)
                         else:
-                            resval =torch.bmm(h_src,self.res_fc).permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
-                            -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                            resval =torch.bmm(h_src,self.res_fc)
+                            if self.aggregator and "by_slot" in self.aggregator:
+                                resval =resval[target_slot,:,:].unsqueeze(1)
+                            else:
+                                resval =resval.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                                -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
                         #resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
                     else:
                         resval = self.res_fc(h_src).view(h_dst.shape[0], -1, self._out_feats*self.num_ntype)  #Identity
