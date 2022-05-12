@@ -277,7 +277,7 @@ class slotGATConv(nn.Module):
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
 
-        elif self.aggregator=="last_fc" or (self.aggregator and "by_slot" in self.aggregator):
+        elif self.aggregator=="last_fc" or (self.aggregator and "by_slot" in self.aggregator) or self.aggregator=="slot_majority_voting":
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
             self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
@@ -418,6 +418,12 @@ class slotGATConv(nn.Module):
                     if self.aggregator and "by_slot" in self.aggregator:
                         target_slot=int(self.aggregator.split("_")[2])
                         feat_src = feat_dst =feat_dst[target_slot,:,:].unsqueeze(1)
+                    elif  self.aggregator=="slot_majority_voting":
+                        with torch.no_grad():
+                            nnt_nn=torch.argmax(feat_dst,dim=-1).permute(1,0)   # num_nodes * num_ntypes
+                            votings=torch.argmax(F.one_hot(torch.argmax(feat_dst,dim=-1).permute(1,0)).sum(1),dim=-1)  #num_nodes
+                            votings_int=(nnt_nn==(votings.unsqueeze(1))).int().permute(1,0).unsqueeze(-1)   #num_ntypes* num_nodes *1
+                        feat_src = feat_dst =(votings_int*feat_dst).sum(0).unsqueeze(1)
                     else:
                         feat_src = feat_dst =feat_dst.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
                             -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
@@ -501,6 +507,8 @@ class slotGATConv(nn.Module):
                             resval =torch.bmm(h_src,self.res_fc)
                             if self.aggregator and "by_slot" in self.aggregator:
                                 resval =resval[target_slot,:,:].unsqueeze(1)
+                            elif self.aggregator=="slot_majority_voting":
+                                resval =(resval*votings_int).sum(0).unsqueeze(1)
                             else:
                                 resval =resval.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
                                 -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
