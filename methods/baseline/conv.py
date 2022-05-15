@@ -229,7 +229,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,aggregator=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -241,7 +241,6 @@ class slotGATConv(nn.Module):
         self.res_n_type_mappings=res_n_type_mappings
         self.etype_specified_attention=etype_specified_attention
         self.eindexer=eindexer
-        self.aggregator=aggregator
         self.num_ntype=num_ntype 
         self.semantic_transition_matrix=nn.Parameter(th.Tensor(self.num_ntype , self.num_ntype))
         self.semantic_trans=semantic_trans
@@ -261,13 +260,7 @@ class slotGATConv(nn.Module):
             raise Exception("!!!")
         else:
             if not n_type_mappings:
-                #self.fc = nn.Linear(
-                    #self._in_src_feats, out_feats * num_heads, bias=False)
-                if self.aggregator=="last_fc":
-                    self.fc = nn.Parameter(th.FloatTensor(size=(self._in_src_feats*self.num_ntype, out_feats * num_heads))) #num_heads=1 in last layer
-                else:
-
-                    self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+                self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
             """else:
                 self.fc =nn.ModuleList([nn.Linear(
                     self._in_src_feats, out_feats * num_heads, bias=False)  for _ in range(num_ntype)] )
@@ -277,10 +270,6 @@ class slotGATConv(nn.Module):
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
 
-        elif self.aggregator=="last_fc": #or (self.aggregator and "by_slot" in self.aggregator) or self.aggregator=="slot_majority_voting":
-            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats)))
-            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
         else:
             
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
@@ -292,10 +281,7 @@ class slotGATConv(nn.Module):
         if residual:
             if self._in_dst_feats != out_feats:
                 if not self.res_n_type_mappings:
-                    if self.aggregator=="last_fc":
-                        self.res_fc =nn.Parameter(th.FloatTensor(size=( self._in_src_feats*self.num_ntype, out_feats * num_heads)))#num_heads=1 in last layer
-                    else:
-                        self.res_fc =nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
+                    self.res_fc =nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
                     """self.res_fc = nn.Linear(
                         self._in_dst_feats, num_heads * out_feats, bias=False)"""
                 else:
@@ -394,13 +380,6 @@ class slotGATConv(nn.Module):
                         h_new.append(self.fc[type_count](h_src[idx,:]).view(
                         -1, self._num_heads, self._out_feats))
                     feat_src = feat_dst = torch.cat(h_new, 0)
-                elif self.aggregator=="last_fc":
-                    h_src=h_src.view(-1,1,self.num_ntype,self._in_src_feats)
-                    h_src=torch.matmul(st_m,h_src)
-                    h_src=h_src.flatten(1)
-
-                    feat_src = feat_dst = torch.mm(h_src,self.fc).view(-1,1,self._out_feats)
-
 
                 else:
                     if self.inputhead:
@@ -415,16 +394,6 @@ class slotGATConv(nn.Module):
                     
                     feat_dst = torch.bmm(h_src,self.fc)  #num_ntype*num_nodes*(out_feats * num_heads)
                     
-                    """if self.aggregator and "by_slot" in self.aggregator:
-                        target_slot=int(self.aggregator.split("_")[2])
-                        feat_src = feat_dst =feat_dst[target_slot,:,:].unsqueeze(1)
-                    elif  self.aggregator=="slot_majority_voting":
-                        with torch.no_grad():
-                            nnt_nn=torch.argmax(feat_dst,dim=-1).permute(1,0)   # num_nodes * num_ntypes
-                            votings=torch.argmax(F.one_hot(torch.argmax(feat_dst,dim=-1).permute(1,0)).sum(1),dim=-1)  #num_nodes
-                            votings_int=(nnt_nn==(votings.unsqueeze(1))).int().permute(1,0).unsqueeze(-1)   #num_ntypes* num_nodes *1
-                        feat_src = feat_dst =(votings_int*feat_dst).sum(0).unsqueeze(1)
-                    else:"""
                     feat_src = feat_dst =feat_dst.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
                             -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
                     
@@ -501,17 +470,9 @@ class slotGATConv(nn.Module):
             if self.res_fc is not None:
                 if not self.res_n_type_mappings:
                     if self._in_dst_feats != self._out_feats:
-                        if self.aggregator=="last_fc":
-                            resval =torch.mm(h_src,self.res_fc).view(-1,1,self._out_feats)
-                        else:
-                            resval =torch.bmm(h_src,self.res_fc)
-                            """if self.aggregator and "by_slot" in self.aggregator:
-                                resval =resval[target_slot,:,:].unsqueeze(1)
-                            elif self.aggregator=="slot_majority_voting":
-                                resval =(resval*votings_int).sum(0).unsqueeze(1)
-                            else:"""
-                            resval =resval.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
-                                -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
+                        resval =torch.bmm(h_src,self.res_fc)
+                        resval =resval.permute(1,0,2).view(                 #num_nodes*num_heads*(num_ntype*hidden_dim)
+                            -1,self.num_ntype ,self._num_heads, self._out_feats).permute(0,2,1,3).flatten(2)
                         #resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
                     else:
                         resval = self.res_fc(h_src).view(h_dst.shape[0], -1, self._out_feats*self.num_ntype)  #Identity

@@ -1,4 +1,5 @@
 import torch
+import torch as th
 import torch.nn.functional as F
 import torch.nn as nn
 import dgl
@@ -398,6 +399,7 @@ class slotGAT(nn.Module):
         #self.ae_drop=nn.Dropout(feat_drop)
         #if ae_layer=="last_hidden":
             #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
+        self.last_fc = nn.Parameter(th.FloatTensor(size=(num_classes*self.num_ntype, num_classes))) ;nn.init.xavier_normal_(self.last_fc, gain=1.414)
         for fc in self.fc_list:
             nn.init.xavier_normal_(fc.weight, gain=1.414)
         # input projection (no residual)
@@ -413,7 +415,7 @@ class slotGAT(nn.Module):
         # output projection
         self.gat_layers.append(slotGATConv(edge_dim, num_etypes,
             num_hidden* heads[-2] , num_classes, heads[-1],
-            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,aggregator=aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint))
+            feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint))
         self.aggregator=aggregator
         self.by_slot=[f"by_slot_{nt}" for nt in range(g.num_ntypes)]
         assert aggregator in (["onedimconv","average","last_fc","slot_majority_voting"]+self.by_slot)
@@ -453,18 +455,23 @@ class slotGAT(nn.Module):
             else:
                 target_slot=int(self.predicted_by_slot)
                 logits=logits[:,:,target_slot,:].squeeze(2)
-            self.logits_mean=logits.flatten().mean()
         else:
             if self.aggregator=="average":
                 logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
             elif self.aggregator=="onedimconv":
                 logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
             elif self.aggregator=="last_fc":
-                logits=logits
+                logits=logits.view(-1,1,self.num_ntype,self.num_classes)
+                logits=logits.flatten(1)
+                logits=logits.matmul(self.last_fc).unsqueeze(1)
+
+
+
             else:
                 raise NotImplementedError()
         #average across the heads
         ### logits = [num_nodes *  num_of_heads *num_classes]
+        self.logits_mean=logits.flatten().mean()
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
