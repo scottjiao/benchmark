@@ -379,7 +379,7 @@ class slotGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0):
+                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,predicted_by_slot="None"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -394,6 +394,7 @@ class slotGAT(nn.Module):
         self.attention_mse_weight_factor=attention_mse_weight_factor
         self.attention_1_type_bigger_constraint=attention_1_type_bigger_constraint
         self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
+        self.predicted_by_slot=predicted_by_slot
         #self.ae_drop=nn.Dropout(feat_drop)
         #if ae_layer=="last_hidden":
             #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
@@ -439,19 +440,35 @@ class slotGAT(nn.Module):
         # output projection
         logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
         #average across the ntype info
-        if self.aggregator=="average":
-            logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
-        elif self.aggregator=="onedimconv":
-            logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
-        elif self.aggregator=="last_fc":
-            logits=logits
-        elif self.aggregator in self.by_slot:
-            logits=logits
-        elif self.aggregator=="slot_majority_voting":
-            logits=logits
+        if self.predicted_by_slot!="None" and self.training==False:
+            #assert self.aggregator=="None"
+            logits=logits.view(-1,1,self.num_ntype,self.num_classes)
+            if self.predicted_by_slot=="majority_voting":
+                logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
+                with torch.no_grad():
+                    nnt_nn=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
+                    votings=torch.argmax(F.one_hot(torch.argmax(logits,dim=-1)).sum(1),dim=-1)  #num_nodes
+                    votings_int=(nnt_nn==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
+                logits=(logits*votings_int).sum(1,keep_dim=True) #num_nodes *  1 *num_classes
+            else:
+                target_slot=int(self.predicted_by_slot)
+                logits=logits[:,:,target_slot,:].squeeze(2)
+            self.logits_mean=logits.flatten().mean()
         else:
-            raise NotImplementedError()
+            if self.aggregator=="average":
+                logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+            elif self.aggregator=="onedimconv":
+                logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
+            elif self.aggregator=="last_fc":
+                logits=logits
+            elif self.aggregator in self.by_slot:
+                logits=logits
+            elif self.aggregator=="slot_majority_voting":
+                logits=logits
+            else:
+                raise NotImplementedError()
         #average across the heads
+        ### logits = [num_nodes *  num_of_heads *num_classes]
         logits = logits.mean(1)
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
