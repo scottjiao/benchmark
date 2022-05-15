@@ -461,10 +461,6 @@ class slotGAT(nn.Module):
                 logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
             elif self.aggregator=="last_fc":
                 logits=logits
-            elif self.aggregator in self.by_slot:
-                logits=logits
-            elif self.aggregator=="slot_majority_voting":
-                logits=logits
             else:
                 raise NotImplementedError()
         #average across the heads

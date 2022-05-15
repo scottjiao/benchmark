@@ -93,7 +93,6 @@ def run_command_in_parallel(args_dict,gpus,worker_num):
         command+=f"   > ./log/{args_dict['study_name']}.txt  "
         for _ in range(worker_num):
             
-            command+=f"   > ./log/{args_dict['study_name']}.txt  "
             print(f"running: {command}")
             p=Run(command)
             p.daemon=True
@@ -116,45 +115,55 @@ def config_study_name(prefix,specified_args,extract_dict):
 
 if __name__ == '__main__':
     
-    dataset_to_evaluate=[("IMDB_corrected",1,1),("IMDB_corrected_oracle",1,1),]  # dataset,worker_num,repeat
+    
+    dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
-    fixed_info={"get_out":"True",}
+    prefix="get_results";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator",     "predicted_by_slot"]
+
+
+    fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average"}
     task_to_evaluate=[
-    {"task_property":"technique","net":"slotGAT","feats-type":"0","slot_aggregator":"by_slot_0"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"0","slot_aggregator":"by_slot_1"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"0","slot_aggregator":"by_slot_2"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"0","slot_aggregator":"by_slot_3"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"0","slot_aggregator":"slot_majority_voting"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"1","slot_aggregator":"by_slot_0"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"1","slot_aggregator":"by_slot_1"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"1","slot_aggregator":"by_slot_2"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"1","slot_aggregator":"by_slot_3"},
-    {"task_property":"technique","net":"slotGAT","feats-type":"1","slot_aggregator":"slot_majority_voting"},
+    {"feats-type":"0","predicted_by_slot":"0"},
+    {"feats-type":"0","predicted_by_slot":"1"},
+    {"feats-type":"1","predicted_by_slot":"0"},
+    {"feats-type":"1","predicted_by_slot":"1"},
     ]
     gpus=["0"]
     total_trial_num=1
 
 
 
+
+
+
+
+
+
+
+
+
+
     for dataset,worker_num,repeat in dataset_to_evaluate:
         for task in task_to_evaluate:
+            args_dict={}
+            for dict_to_add in [task,fixed_info]:
+                for k,v in dict_to_add.items():
+                    args_dict[k]=v
             net=args_dict['net']
-            yes=["technique","feat_type",f"feat_type_{task['feats-type']}",f"aggr_{task['slot_aggregator']}"]
-            no=[]
+            yes=["technique",f"feat_type_{args_dict['feats-type']}",f"aggr_{args_dict['slot_aggregator']}"]
+            no=["attantion_average","attention_average","attention_mse","edge_feat_0","oracle"]
             best_hypers=get_best_hypers(dataset,net,yes,no)
+            for dict_to_add in [best_hypers]:
+                for k,v in dict_to_add.items():
+                    args_dict[k]=v
             trial_num=int(total_trial_num/ (len(gpus)*worker_num) )
             if trial_num<=1:
                 trial_num=1
 
-            args_dict={}
             args_dict['dataset']=dataset
             args_dict['trial_num']=trial_num
             args_dict['repeat']=repeat
-            for dict_to_add in [best_hypers,task,fixed_info]:
-                for k,v in dict_to_add.items():
-                    args_dict[k]=v
 
-            prefix="get_embeddings";specified_args=["dataset","feats-type","slot_aggregator"]
             study_name,study_storage=config_study_name(prefix=prefix,specified_args=specified_args,extract_dict=args_dict)
             #study_name=f"get_embeddings_{dataset}_net_{task['net']}_feats_type_{task['feats-type']}_slot_aggregator{task['slot_aggregator']}"
             #study_storage=f"sqlite:///db/{study_name}.db"
@@ -165,5 +174,3 @@ if __name__ == '__main__':
 
 
             run_command_in_parallel(args_dict,gpus,worker_num)
-
-

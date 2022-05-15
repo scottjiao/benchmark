@@ -6,13 +6,6 @@ import multiprocessing
 from threading import main_thread
 from pipeline_utils import get_best_hypers,run_command_in_parallel,config_study_name
 import os
-class Run( multiprocessing.Process):
-    def __init__(self,command):
-        super().__init__()
-        self.command=command
-    def run(self):
-        
-        subprocess.run(self.command,shell=True)
 
 dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
