@@ -443,15 +443,18 @@ class slotGAT(nn.Module):
         logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
         #average across the ntype info
         if self.predicted_by_slot!="None" and self.training==False:
-            #assert self.aggregator=="None"
             logits=logits.view(-1,1,self.num_ntype,self.num_classes)
+            self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0)
             if self.predicted_by_slot=="majority_voting":
                 logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
                 with torch.no_grad():
                     nnt_nn=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
+                    ## num_nodes * num_ntypes *num_classes
+                    ## num_nodes *num_classes
                     votings=torch.argmax(F.one_hot(torch.argmax(logits,dim=-1)).sum(1),dim=-1)  #num_nodes
+                    #num_nodes*1
                     votings_int=(nnt_nn==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
-                logits=(logits*votings_int).sum(1,keep_dim=True) #num_nodes *  1 *num_classes
+                logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
             else:
                 target_slot=int(self.predicted_by_slot)
                 logits=logits[:,:,target_slot,:].squeeze(2)

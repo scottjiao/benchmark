@@ -656,7 +656,7 @@ def run_model_DBLP(trial=None):
                 assert args.trial_num==1
                 if not os.path.exists(f"./testout/{ args.study_name.replace(args.dataset+'_','')}"):
                     os.mkdir(f"./testout/{ args.study_name.replace(args.dataset+'_','')}")
-                dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"./testout/{ args.study_name.replace(args.dataset+'_','')}/{args.dataset}_{re}.txt",mode=dl_mode)
+                dl.gen_file_for_evaluate(test_idx=test_idx, label=pred, file_path=f"./testout/{ args.study_name.replace(args.dataset+'_','')}/{args.dataset}_{re+1}.txt",mode=dl_mode)
             pred = onehot[pred] if not multi_labels else  pred
             d=dl.evaluate(pred,mode=dl_mode)
             print(d) if args.verbose=="True" else None
@@ -684,20 +684,22 @@ def run_model_DBLP(trial=None):
 
         if args.net=="slotGAT":
             print(net.logits_mean)
-            for i in range(num_layers):
-                for head in range(num_heads):
-                    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
-                    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_head,bins=10,range=(0,1))[0])]
-                    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_head_{head}")
-                for etype in range(num_etype):
-                    attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
-                    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
-                    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
-                vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
-                for nt in tqdm(range(net.gat_layers[i].emb.shape[0])):
-                    x_emb=TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(net.gat_layers[i].emb[nt].squeeze(0).numpy())
-                    #vis_data_saver.collect_whole_process_tensor(  ,name=f"emb_layer_{i}")
-                    vis_data_saver.collect_whole_process( x_emb.tolist() ,name=f"tsne_emb_layer_{i}_slot_{nt}")
+            print(net.scale_analysis)
+            vis_data_saver.collect_whole_process([x.tolist() for x in net.scale_analysis ],name=f"scale_analysis")
+            #for i in range(num_layers):
+                #for head in range(num_heads):
+                #    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
+                #    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_head,bins=10,range=(0,1))[0])]
+                #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_head_{head}")
+                #for etype in range(num_etype):
+                #    attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
+                #    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
+                #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
+                #vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
+                #for nt in tqdm(range(net.gat_layers[i].emb.shape[0])):
+                #    #x_emb=TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(net.gat_layers[i].emb[nt].squeeze(0).numpy())
+                #    #vis_data_saver.collect_whole_process_tensor(  ,name=f"emb_layer_{i}")
+                #    #vis_data_saver.collect_whole_process( x_emb.tolist() ,name=f"tsne_emb_layer_{i}_slot_{nt}")
 
 
 
@@ -712,7 +714,7 @@ def run_model_DBLP(trial=None):
         if not os.path.exists(f"./analysis/{args.study_name}"):
             os.mkdir(f"./analysis/{args.study_name}")
         vis_data_saver.save(os.path.join(f"./analysis/{args.study_name}",args.study_name+".visdata"))
-        vis_data_saver.visualize_tsne(dn=f"./analysis/{args.study_name}",node_idx_by_ntype=g.node_idx_by_ntype)
+        #vis_data_saver.visualize_tsne(dn=f"./analysis/{args.study_name}",node_idx_by_ntype=g.node_idx_by_ntype)
 
 
         
