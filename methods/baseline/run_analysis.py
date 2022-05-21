@@ -741,6 +741,46 @@ def run_model_DBLP(trial=None):
                 result=dl.evaluate_by_group(pred,test_pat_ids,train=False,mode="multi")
                 vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")
 
+            #different predicted number of labels
+            #diff_len_dict={"train":{},"test":{}}
+            diff_len_idx={"train":{},"test":{}}
+            diff_len_results={"train":{},"test":{}}
+            for i in train_idx.tolist()+val_idx.tolist():
+                lbs=dl.labels_train['data'][i].nonzero()[0]
+                pds=pred[i].nonzero()[0]
+                true_label_length=len(lbs)
+                diff_length=len(pds)-len(lbs)
+                k=f"true_label_length:{true_label_length}/diff_length: {diff_length}"
+                if k not in diff_len_idx["train"].keys():
+                    #diff_len_dict["train"][k]=0
+                    diff_len_idx["train"][k]=[]
+                #diff_len_dict["train"][k]+=1
+                diff_len_idx["train"][k].append(i)
+            for k,idx_list in diff_len_idx["train"].items():
+                diff_len_results["train"][k]=dl.evaluate_by_group(pred,idx_list,train=True,mode="multi")
+            #diff_len_dict["train"]=sorted([(k,v) for k,v in diff_len_dict["train"].items()])
+            diff_len_results["train"]=sorted([(k,v) for k,v in diff_len_results["train"].items()])
+            
+            for i in test_idx.tolist():
+                lbs=dl.labels_test['data'][i].nonzero()[0]
+                pds=pred[i].nonzero()[0]
+                true_label_length=len(lbs)
+                diff_length=len(pds)-len(lbs)
+                k=f"true_label_length:{true_label_length}/diff_length: {diff_length}"
+                if k not in diff_len_idx["test"].keys():
+                    #diff_len_dict["test"][k]=0
+                    diff_len_idx["test"][k]=[]
+                #diff_len_dict["test"][k]+=1
+                diff_len_idx["test"][k].append(i)
+            for k,idx_list in diff_len_idx["test"].items():
+                diff_len_results["test"][k]=dl.evaluate_by_group(pred,idx_list,train=False,mode="multi")
+            #diff_len_dict["test"]=sorted([(k,v) for k,v in diff_len_dict["test"].items()])
+            diff_len_results["test"]=sorted([(k,v) for k,v in diff_len_results["test"].items()])
+            
+            #vis_data_saver.collect_whole_process(diff_len_dict   ,name=f"diff_len_dict")
+            vis_data_saver.collect_whole_process(diff_len_results   ,name=f"diff_len_results")
+
+
                     
 
             #vis_data_saver.collect_whole_process([x.tolist() for x in net.scale_analysis ],name=f"scale_analysis")
