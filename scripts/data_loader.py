@@ -191,6 +191,28 @@ class data_loader:
             result.update({"mcm":mcm})
         return result
 
+    def evaluate_by_group(self,pred,group_ids,train=False,mode="bi"):
+        if len(group_ids)<1:
+            return {'micro-f1': "NoNodes",'macro-f1': "NoNodes",}
+        if train:
+            labels=self.labels_train['data']
+        else:
+            labels=self.labels_test['data']
+        labels=labels[group_ids]
+        pred=pred[group_ids]
+        micro = f1_score(labels, pred, average='micro')
+        macro = f1_score(labels, pred, average='macro')
+        result = {
+            'micro-f1': micro,
+            'macro-f1': macro,
+            'num':len(group_ids)
+        }
+        #if  mode=='multi':
+            #mcm=multilabel_confusion_matrix(labels, pred)
+            #result.update({"mcm":str(mcm)})
+        return result
+        
+
     def load_labels(self, name):
         """
         return labels dict

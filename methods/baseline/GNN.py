@@ -418,7 +418,7 @@ class slotGAT(nn.Module):
             feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint))
         self.aggregator=aggregator
         self.by_slot=[f"by_slot_{nt}" for nt in range(g.num_ntypes)]
-        assert aggregator in (["onedimconv","average","last_fc","slot_majority_voting"]+self.by_slot)
+        assert aggregator in (["onedimconv","average","last_fc","slot_majority_voting","max"]+self.by_slot)
         if self.aggregator=="onedimconv":
             self.nt_aggr=nn.Parameter(torch.FloatTensor(1,1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
@@ -445,16 +445,51 @@ class slotGAT(nn.Module):
         if self.predicted_by_slot!="None" and self.training==False:
             logits=logits.view(-1,1,self.num_ntype,self.num_classes)
             self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0)
-            if self.predicted_by_slot=="majority_voting":
+            if self.predicted_by_slot in ["majority_voting","majority_voting_max"] :
                 logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
                 with torch.no_grad():
-                    nnt_nn=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
-                    ## num_nodes * num_ntypes *num_classes
+                    slot_votings=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
+                    slot_votings_onehot=F.one_hot(slot_votings)## num_nodes * num_ntypes *num_classes
+                    votings_count=slot_votings_onehot.sum(1) ## num_nodes  *num_classes
+                    votings_max_count=votings_count.max(1)[0] ## num_nodes 
+                    ties_flags_pos=(votings_max_count.unsqueeze(-1)==votings_count)   ## num_nodes  *num_classes
+                    ties_flags=ties_flags_pos.sum(-1)>1   ## num_nodes 
+                    ties_ids=ties_flags.int().nonzero().flatten().tolist()   ## num_nodes 
+                    voting_patterns=torch.sort(votings_count,descending=True,dim=-1)[0]  #num_nodes  *num_classes
+                    pattern_counts={}
+                    ties_labels={}
+                    ties_first_labels={}
+                    ties_second_labels={}
+                    ties_third_labels={}
+                    ties_fourth_labels={}
+                    for i in range(voting_patterns.shape[0]):
+                        if i in self.g.node_idx_by_ntype[0]:
+                            pattern=tuple(voting_patterns[i].flatten().tolist())
+                            if pattern not in pattern_counts.keys():
+                                pattern_counts[pattern]=0
+                            pattern_counts[pattern]+=1
+
+                    for i in ties_ids:
+                        ties_labels[i]=ties_flags_pos[i].nonzero().flatten().tolist()
+                        ties_first_labels[i]=ties_labels[i][0]
+                        ties_second_labels[i]=ties_first_labels[i] if len(ties_labels[i])<2 else ties_labels[i][1]
+                        ties_third_labels[i]=ties_second_labels[i] if len(ties_labels[i])<3 else ties_labels[i][2]
+                        ties_fourth_labels[i]=ties_third_labels[i] if len(ties_labels[i])<4 else ties_labels[i][3]
+                            
+                    self.majority_voting_analysis={"pattern_counts":pattern_counts,"ties_first_labels":ties_first_labels,"ties_second_labels":ties_second_labels,"ties_third_labels":ties_third_labels,"ties_fourth_labels":ties_fourth_labels,"ties_labels":ties_labels,"ties_ids":ties_ids}
+
                     ## num_nodes *num_classes
                     votings=torch.argmax(F.one_hot(torch.argmax(logits,dim=-1)).sum(1),dim=-1)  #num_nodes
                     #num_nodes*1
-                    votings_int=(nnt_nn==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
-                logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
+                    votings_int=(slot_votings==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
+                    self.votings_int=votings_int
+                    self.voting_patterns=voting_patterns
+
+
+                if self.predicted_by_slot=="majority_voting_max":
+                    logits=(logits*votings_int).max(1,keepdim=True)[0] #num_nodes *  1 *num_classes
+                else:
+                    logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
             else:
                 target_slot=int(self.predicted_by_slot)
                 logits=logits[:,:,target_slot,:].squeeze(2)
@@ -467,6 +502,8 @@ class slotGAT(nn.Module):
                 logits=logits.view(-1,1,self.num_ntype,self.num_classes)
                 logits=logits.flatten(1)
                 logits=logits.matmul(self.last_fc).unsqueeze(1)
+            elif self.aggregator=="max":
+                logits=logits.view(-1,1,self.num_ntype,self.num_classes).max(2)[0]
 
 
 

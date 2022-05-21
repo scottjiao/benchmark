@@ -206,6 +206,9 @@ def run_model_DBLP(trial=None):
                     f"\n\tedge num: {adjM.nnz}"+\
                     f"\n\tclass num: {class_num}"+\
                     f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[args.feats_type]}"+"\n"+f"exp setting: {vars(args)}"+"\n"
+        if multi_labels:
+            for num,ct in enumerate([(torch.LongTensor(labels).sum(1)==i).int().sum().item() for i in range(class_num+1)]):
+                exp_info+=f"\n\t{ct} nodes has {num} labels"
         print(exp_info) if args.verbose else None
         vis_data_saver=vis_data_collector()
         vis_data_saver.save_meta(exp_info,"exp_info")
@@ -683,9 +686,66 @@ def run_model_DBLP(trial=None):
     if args.get_out=="True":
 
         if args.net=="slotGAT":
-            print(net.logits_mean)
-            print(net.scale_analysis)
-            vis_data_saver.collect_whole_process([x.tolist() for x in net.scale_analysis ],name=f"scale_analysis")
+            #print(net.logits_mean)
+            #print(net.scale_analysis)
+            #net.majority_voting_analysis["pattern_counts"]
+            #net.majority_voting_analysis["ties_first_labels"]
+            ties_labels=net.majority_voting_analysis["ties_labels"]
+            for choice_pos,ties_order_labels in enumerate([net.majority_voting_analysis["ties_first_labels"],net.majority_voting_analysis["ties_second_labels"],net.majority_voting_analysis["ties_third_labels"],net.majority_voting_analysis["ties_fourth_labels"]]):
+                choice_pos+=1
+                #training 
+                count=0
+                t_count=0
+                for node in train_idx.tolist()+val_idx.tolist():
+                    if node in ties_labels.keys():
+                        tie_lb=ties_order_labels[node]
+                        if dl.labels_train['data'][node][tie_lb]:
+                            count+=1
+                        t_count+=1
+                print(f"training correct count of {choice_pos}-th choice: {count}/{t_count}")
+                vis_data_saver.collect_whole_process(f"{count}/{t_count}",name=f"training correct count of {choice_pos}-th choice")
+
+                count=0
+                t_count=0
+                for node in test_idx.tolist():
+                    if node in ties_labels.keys():
+                        tie_lb=ties_order_labels[node]
+                        if dl.labels_test['data'][node][tie_lb]:
+                            count+=1
+                        t_count+=1
+                print(f"test correct count of {choice_pos}-th choice: {count}/{t_count}")
+                vis_data_saver.collect_whole_process(f"{count}/{t_count}",name=f"test correct count of {choice_pos}-th choice")
+            vis_data_saver.collect_whole_process(str(net.majority_voting_analysis['pattern_counts'])   ,name=f"pattern_counts")
+            slot_counts=net.votings_int.squeeze(-1)[g.node_idx_by_ntype[0]].sum(0).flatten().tolist()
+            vis_data_saver.collect_whole_process(slot_counts   ,name=f"slot_counts")
+            slots_correlations=(net.votings_int.squeeze(-1)[g.node_idx_by_ntype[0]].transpose(1,0).float().matmul( net.votings_int.squeeze(-1)[g.node_idx_by_ntype[0]].float()  )).tolist()
+            vis_data_saver.collect_whole_process(slots_correlations   ,name=f"slots_correlations")
+
+
+            #grouping the patterns
+            pattern_counts=net.majority_voting_analysis['pattern_counts']
+            pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
+            for pattern in pattern_counts.keys():
+                #train_pattern
+                train_pat_ids=[]
+                for i in train_idx.tolist()+val_idx.tolist():
+                    if tuple(net.voting_patterns[i].flatten().tolist())==pattern:
+                        train_pat_ids.append(i)
+                result=dl.evaluate_by_group(pred,train_pat_ids,train=True,mode="multi")
+                vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(train+val)")
+                #test_pattern
+                test_pat_ids=[]
+                for i in test_idx.tolist():
+                    if tuple(net.voting_patterns[i].flatten().tolist())==pattern:
+                        test_pat_ids.append(i)
+                result=dl.evaluate_by_group(pred,test_pat_ids,train=False,mode="multi")
+                vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")
+
+                    
+
+            #vis_data_saver.collect_whole_process([x.tolist() for x in net.scale_analysis ],name=f"scale_analysis")
+            #vis_data_saver.collect_whole_process(net.ties_ratio_1,name=f"ties_ratio_1")
+            #vis_data_saver.collect_whole_process(net.ties_ratio_2,name=f"ties_ratio_2")
             #for i in range(num_layers):
                 #for head in range(num_heads):
                 #    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
