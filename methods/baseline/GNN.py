@@ -490,6 +490,8 @@ class slotGAT(nn.Module):
                     logits=(logits*votings_int).max(1,keepdim=True)[0] #num_nodes *  1 *num_classes
                 else:
                     logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
+            elif self.predicted_by_slot=="max":
+                logits=logits.max(2)[0]
             else:
                 target_slot=int(self.predicted_by_slot)
                 logits=logits[:,:,target_slot,:].squeeze(2)

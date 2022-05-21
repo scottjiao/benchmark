@@ -7,20 +7,30 @@ from threading import main_thread
 from pipeline_utils import get_best_hypers,run_command_in_parallel,config_study_name,Run
 import os
 
-dataset_to_evaluate=[("IMDB_corrected",1,1),]  # dataset,worker_num,repeat
+dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
-prefix="ablation";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator",     "predicted_by_slot"]
+prefix="get_results";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator",     "predicted_by_slot"]
 
 
-fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","get_out":"True","verbose":"True"}
+fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average"}
 task_to_evaluate=[
-{"feats-type":"1","predicted_by_slot":"majority_voting"},
-{"feats-type":"0","predicted_by_slot":"majority_voting"},
-{"feats-type":"1","predicted_by_slot":"majority_voting_max"},
-{"feats-type":"0","predicted_by_slot":"majority_voting_max"},
+{"feats-type":"1","predicted_by_slot":"max"},
+{"feats-type":"0","predicted_by_slot":"max"},
+{"feats-type":"2","predicted_by_slot":"max"},
 ]
-gpus=["1"]
+gpus=["0"]
 total_trial_num=1
+
+
+
+
+
+
+
+
+
+
+
 
 
 for dataset,worker_num,repeat in dataset_to_evaluate:
@@ -30,11 +40,7 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
             for k,v in dict_to_add.items():
                 args_dict[k]=v
         net=args_dict['net']
-        ##################################
-        ##edit yes and no for filtering!##
-        ##################################
         yes=["technique",f"feat_type_{args_dict['feats-type']}",f"aggr_{args_dict['slot_aggregator']}"]
-        #yes=[]
         no=["attantion_average","attention_average","attention_mse","edge_feat_0","oracle"]
         best_hypers=get_best_hypers(dataset,net,yes,no)
         for dict_to_add in [best_hypers]:
