@@ -380,7 +380,8 @@ class slotGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,predicted_by_slot="None"):
+                 ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,predicted_by_slot="None",
+                 addLogitsEpsilon=0,addLogitsTrain="None"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -396,6 +397,8 @@ class slotGAT(nn.Module):
         self.attention_1_type_bigger_constraint=attention_1_type_bigger_constraint
         self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
         self.predicted_by_slot=predicted_by_slot
+        self.addLogitsEpsilon=addLogitsEpsilon
+        self.addLogitsTrain=addLogitsTrain
         #self.ae_drop=nn.Dropout(feat_drop)
         #if ae_layer=="last_hidden":
             #self.lc_ae=nn.ModuleList([nn.Linear(num_hidden * heads[-2],num_hidden, bias=True),nn.Linear(num_hidden,num_ntype, bias=True)])
@@ -515,6 +518,8 @@ class slotGAT(nn.Module):
         ### logits = [num_nodes *  num_of_heads *num_classes]
         self.logits_mean=logits.flatten().mean()
         logits = logits.mean(1)
+        if self.addLogitsTrain=="True" or (self.addLogitsTrain=="False" and self.training==False):
+            logits+=self.addLogitsEpsilon
         # This is an equivalent replacement for tf.l2_normalize, see https://www.tensorflow.org/versions/r1.15/api_docs/python/tf/math/l2_normalize for more information.
         logits = logits / (torch.max(torch.norm(logits, dim=1, keepdim=True), self.epsilon))
         return logits, encoded_embeddings    #hidden_logits

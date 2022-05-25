@@ -89,6 +89,8 @@ ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
 ap.add_argument('--get_test_for_online', default="False")  
+ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
+ap.add_argument('--addLogitsTrain', type=str, default="False")  #
 
 ap.add_argument('--delete_type_nodes', default="None")  
 
@@ -192,6 +194,8 @@ def run_model_DBLP(trial=None):
         attention_mse_weight_factor=args.attention_mse_weight_factor
         attention_1_type_bigger_constraint=args.attention_1_type_bigger_constraint
         attention_0_type_bigger_constraint=args.attention_0_type_bigger_constraint
+        addLogitsEpsilon=args.addLogitsEpsilon   #addLogitsEpsilon,addLogitsTrain
+        addLogitsTrain=args.addLogitsTrain
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -443,7 +447,7 @@ def run_model_DBLP(trial=None):
         elif args.net=='slotGAT':
             GNN=slotGAT
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint,
-            predicted_by_slot=predicted_by_slot)
+            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
@@ -690,7 +694,7 @@ def run_model_DBLP(trial=None):
             #print(net.scale_analysis)
             #net.majority_voting_analysis["pattern_counts"]
             #net.majority_voting_analysis["ties_first_labels"]
-            ties_labels=net.majority_voting_analysis["ties_labels"]
+            """ties_labels=net.majority_voting_analysis["ties_labels"]
             for choice_pos,ties_order_labels in enumerate([net.majority_voting_analysis["ties_first_labels"],net.majority_voting_analysis["ties_second_labels"],net.majority_voting_analysis["ties_third_labels"],net.majority_voting_analysis["ties_fourth_labels"]]):
                 choice_pos+=1
                 #training 
@@ -724,7 +728,7 @@ def run_model_DBLP(trial=None):
 
             #grouping the patterns
             pattern_counts=net.majority_voting_analysis['pattern_counts']
-            pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
+            
             for pattern in pattern_counts.keys():
                 #train_pattern
                 train_pat_ids=[]
@@ -739,8 +743,10 @@ def run_model_DBLP(trial=None):
                     if tuple(net.voting_patterns[i].flatten().tolist())==pattern:
                         test_pat_ids.append(i)
                 result=dl.evaluate_by_group(pred,test_pat_ids,train=False,mode="multi")
-                vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")
+                vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")"""
 
+                
+            """pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
             #different predicted number of labels
             #diff_len_dict={"train":{},"test":{}}
             diff_len_idx={"train":{},"test":{}}
@@ -778,7 +784,60 @@ def run_model_DBLP(trial=None):
             diff_len_results["test"]=sorted([(k,v) for k,v in diff_len_results["test"].items()])
             
             #vis_data_saver.collect_whole_process(diff_len_dict   ,name=f"diff_len_dict")
-            vis_data_saver.collect_whole_process(diff_len_results   ,name=f"diff_len_results")
+            vis_data_saver.collect_whole_process(diff_len_results   ,name=f"diff_len_results")"""
+
+            # dataset analysis
+            #train
+            
+            """for X,Y,name,flg in [(train_idx.tolist()+val_idx.tolist(),dl.labels_train,"train",True),(test_idx.tolist(),dl.labels_test,"test",False)]:
+                class_idx_dict={}
+                class_idx_results={}
+                cooccurence_1={}
+                cooccurence_2={}
+                cooccurence_3={}
+                for i in X:
+                    lbs=Y['data'][i].nonzero()[0]
+                    for l in lbs:
+                        l=int(l)
+                        if len(lbs) not in class_idx_dict.keys():
+                            class_idx_dict[len(lbs)]={}
+                            class_idx_results[len(lbs)]={}
+                        if l not in class_idx_dict[len(lbs)].keys():
+                            class_idx_dict[len(lbs)][l]=[]
+                            class_idx_results[len(lbs)][l]=[]
+                        class_idx_dict[len(lbs)][l].append(i)
+                        #class_idx_results[len(lbs)][l]=dl.evaluate_by_group(pred,idx_list,train=True,mode="multi")
+                    for l in lbs:
+                        l=int(l)
+                        if l not in cooccurence_1.keys():
+                            cooccurence_1[l]=0
+                        if l not in cooccurence_2.keys():
+                            cooccurence_2[l]={}
+                        if l not in cooccurence_3.keys():
+                            cooccurence_3[l]={}
+                        if len(lbs)==1:
+                            cooccurence_1[l]+=1
+                        for l_ in lbs:
+                            l_=int(l_)
+                            if l_ not in cooccurence_2[l].keys():
+                                cooccurence_2[l][l_]=0
+                            if l_ not in cooccurence_3[l].keys():
+                                cooccurence_3[l][l_]={}
+                            if len(lbs)==2:
+                                cooccurence_2[l][l_]+=1
+                            for l__ in lbs:
+                                l__=int(l__)
+                                if l__ not in cooccurence_3[l][l_].keys():
+                                    cooccurence_3[l][l_][l__]=0
+                                if len(lbs)==3:
+                                    cooccurence_3[l][l_][l__]+=1
+                for length,l_dicts in class_idx_dict.items():
+                    for l,idx in l_dicts.items():
+                        class_idx_results[length][l]=dl.evaluate_by_group(pred,idx,train=flg,mode="multi")
+                vis_data_saver.collect_whole_process(class_idx_results   ,name=f"class_idx_results_by_label_length({name})")
+                vis_data_saver.collect_whole_process(cooccurence_1   ,name=f"cooccurence_1({name})")
+                vis_data_saver.collect_whole_process(cooccurence_2   ,name=f"cooccurence_2({name})")
+                vis_data_saver.collect_whole_process(cooccurence_3   ,name=f"cooccurence_3({name})")"""
 
 
                     

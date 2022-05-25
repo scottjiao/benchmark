@@ -9,14 +9,22 @@ import os
 
 dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
-prefix="get_results";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator",     "predicted_by_slot"]
+prefix="getResults";specified_args=["dataset",  
+                                         "net",    
+                                         "feats-type",     
+                                         "slot_aggregator",
+                                         "addLogitsEpsilon",
+                                         "addLogitsTrain",
+                                         ]
 
 
-fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average"}
+fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","feats-type":"1"}
 task_to_evaluate=[
-{"feats-type":"1","predicted_by_slot":"max"},
-{"feats-type":"0","predicted_by_slot":"max"},
-{"feats-type":"2","predicted_by_slot":"max"},
+{"addLogitsEpsilon":1e-5,"addLogitsTrain":"False"},
+{"addLogitsEpsilon":1e-4,"addLogitsTrain":"False"},
+{"addLogitsEpsilon":1e-3,"addLogitsTrain":"False"},
+{"addLogitsEpsilon":1e-2,"addLogitsTrain":"False"},
+{"addLogitsEpsilon":1e-1,"addLogitsTrain":"False"},
 ]
 gpus=["0"]
 total_trial_num=1
@@ -41,7 +49,7 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
                 args_dict[k]=v
         net=args_dict['net']
         yes=["technique",f"feat_type_{args_dict['feats-type']}",f"aggr_{args_dict['slot_aggregator']}"]
-        no=["attantion_average","attention_average","attention_mse","edge_feat_0","oracle"]
+        no=["attantion_average","attention_average","attention_mse","edge_feat","oracle"]
         best_hypers=get_best_hypers(dataset,net,yes,no)
         for dict_to_add in [best_hypers]:
             for k,v in dict_to_add.items():
