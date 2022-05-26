@@ -91,6 +91,10 @@ ap.add_argument('--get_out', default="False")
 ap.add_argument('--get_test_for_online', default="False")  
 ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
+ap.add_argument('--predictionCorrectionTrainBeta', type=float, default=0)  #
+ap.add_argument('--predictionCorrectionRelu', type=str, default="False")  #
+
+
 
 ap.add_argument('--delete_type_nodes', default="None")  
 
@@ -196,6 +200,8 @@ def run_model_DBLP(trial=None):
         attention_0_type_bigger_constraint=args.attention_0_type_bigger_constraint
         addLogitsEpsilon=args.addLogitsEpsilon   #addLogitsEpsilon,addLogitsTrain
         addLogitsTrain=args.addLogitsTrain
+        predictionCorrectionTrainBeta=args.predictionCorrectionTrainBeta
+        predictionCorrectionRelu=args.predictionCorrectionRelu
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -544,7 +550,25 @@ def run_model_DBLP(trial=None):
 
             logits,encoded_embeddings = net(features_list, e_feat) 
             logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
-            train_loss = loss(logp[train_idx], labels[train_idx]) if not multi_labels else loss(logp[train_idx], labels[train_idx])
+            train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
+            if predictionCorrectionTrainBeta!=0:
+                #on training
+                expLogits=torch.exp(-logits[train_idx].mean(1))
+                trainLabels=labels[train_idx]
+                with torch.no_grad():
+                    trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
+                    dif=trainLabels.sum(1)-trainPred.sum(1)
+                    if predictionCorrectionRelu=="True":
+                        dif=F.relu( dif)
+                correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+                print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
+                train_loss +=correctionLoss
+                
+
+
+
+
+
             if attention_mse_weight_factor>0 or attention_1_type_bigger_constraint>0 or attention_0_type_bigger_constraint>0:
                 mse=0
                 t0_bigger_mse=0
@@ -746,7 +770,7 @@ def run_model_DBLP(trial=None):
                 vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")"""
 
                 
-            """pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
+            pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
             #different predicted number of labels
             #diff_len_dict={"train":{},"test":{}}
             diff_len_idx={"train":{},"test":{}}
@@ -784,7 +808,7 @@ def run_model_DBLP(trial=None):
             diff_len_results["test"]=sorted([(k,v) for k,v in diff_len_results["test"].items()])
             
             #vis_data_saver.collect_whole_process(diff_len_dict   ,name=f"diff_len_dict")
-            vis_data_saver.collect_whole_process(diff_len_results   ,name=f"diff_len_results")"""
+            vis_data_saver.collect_whole_process(diff_len_results   ,name=f"diff_len_results")
 
             # dataset analysis
             #train
