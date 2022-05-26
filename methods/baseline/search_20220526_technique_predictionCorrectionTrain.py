@@ -9,18 +9,23 @@ import os
 
 dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
-prefix="technique";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator","predictionCorrectionTrainBeta"]
+prefix="technique";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator","predictionCorrectionTrainBeta","predictionCorrectionRelu"]
 
 
 fixed_info={"task_property":prefix,"net":"slotGAT","feats-type":1,"slot_aggregator":"average",}
 task_to_evaluate=[
 #{"feats-type":"1","predicted_by_slot":"majority_voting"},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-3},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-3},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-2},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-2},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-2,"predictionCorrectionRelu":"False"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-1,"predictionCorrectionRelu":"False"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionRelu":"False"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionRelu":"False"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3,"predictionCorrectionRelu":"False"},
+#{"feats-type":"1","predicted_by_slot":"majority_voting"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-2,"predictionCorrectionRelu":"True"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1e-1,"predictionCorrectionRelu":"True"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionRelu":"True"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionRelu":"True"},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3,"predictionCorrectionRelu":"True"},
 ]
 gpus=["0","1"]
 total_trial_num=30
