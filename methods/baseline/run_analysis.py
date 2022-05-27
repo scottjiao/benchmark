@@ -93,6 +93,7 @@ ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionTrainBeta', type=float, default=0)  #
 ap.add_argument('--predictionCorrectionRelu', type=str, default="False")  #
+ap.add_argument('--predictionCorrectionTrainGamma', type=float, default=0)  #
 
 
 
@@ -202,6 +203,7 @@ def run_model_DBLP(trial=None):
         addLogitsTrain=args.addLogitsTrain
         predictionCorrectionTrainBeta=args.predictionCorrectionTrainBeta
         predictionCorrectionRelu=args.predictionCorrectionRelu
+        predictionCorrectionTrainGamma=args.predictionCorrectionTrainGamma
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -553,14 +555,21 @@ def run_model_DBLP(trial=None):
             train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
             if predictionCorrectionTrainBeta!=0:
                 #on training
-                expLogits=torch.exp(-logits[train_idx].mean(1))
+                expLogits=torch.exp(-logits[train_idx].mean(1)) #核心就在于对logits均值的操控
+                expLogits_neg=torch.exp(logits[train_idx].mean(1)) 
                 trainLabels=labels[train_idx]
                 with torch.no_grad():
                     trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
                     dif=trainLabels.sum(1)-trainPred.sum(1)
+                    #dif_1= dif
                     if predictionCorrectionRelu=="True":
                         dif=F.relu( dif)
-                correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+                    labelOneFlag=(trainLabels.sum(1)==1).int()
+                    notLabelOneFlag=1-labelOneFlag
+                if predictionCorrectionTrainGamma==0:
+                    correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+                elif predictionCorrectionTrainGamma>0:
+                    correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*labelOneFlag)  ).mean(0)
                 print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
                 train_loss +=correctionLoss
                 
