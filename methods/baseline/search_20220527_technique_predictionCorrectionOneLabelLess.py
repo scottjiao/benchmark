@@ -16,14 +16,11 @@ fixed_info={"task_property":prefix,"net":"slotGAT","feats-type":1,"slot_aggregat
 task_to_evaluate=[
 #{"feats-type":"1","predicted_by_slot":"majority_voting"},
 {"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3e-1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionTrainGamma":3e-1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3,"predictionCorrectionTrainGamma":3e-1},
 {"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionTrainGamma":1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3,"predictionCorrectionTrainGamma":1},
 {"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionTrainGamma":3},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3,"predictionCorrectionTrainGamma":3},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3e-1},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":1},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3},
 ]
 gpus=["0","1"]
 total_trial_num=30

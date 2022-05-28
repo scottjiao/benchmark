@@ -561,15 +561,17 @@ def run_model_DBLP(trial=None):
                 with torch.no_grad():
                     trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
                     dif=trainLabels.sum(1)-trainPred.sum(1)
+                    dif_neg=trainPred.sum(1)-trainLabels.sum(1)
                     #dif_1= dif
                     if predictionCorrectionRelu=="True":
                         dif=F.relu( dif)
+                        
                     labelOneFlag=(trainLabels.sum(1)==1).int()
                     notLabelOneFlag=1-labelOneFlag
                 if predictionCorrectionTrainGamma==0:
                     correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
                 elif predictionCorrectionTrainGamma>0:
-                    correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*labelOneFlag)  ).mean(0)
+                    correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*dif_neg*labelOneFlag)  ).mean(0)
                 print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
                 train_loss +=correctionLoss
                 
