@@ -92,6 +92,7 @@ ap.add_argument('--get_test_for_online', default="False")
 ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionTrainBeta', type=float, default=0)  #
+ap.add_argument('--predictionCorrectionLabelLength', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionRelu', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionTrainGamma', type=float, default=0)  #
 
@@ -204,6 +205,7 @@ def run_model_DBLP(trial=None):
         predictionCorrectionTrainBeta=args.predictionCorrectionTrainBeta
         predictionCorrectionRelu=args.predictionCorrectionRelu
         predictionCorrectionTrainGamma=args.predictionCorrectionTrainGamma
+        predictionCorrectionLabelLength=args.predictionCorrectionLabelLength
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -565,11 +567,17 @@ def run_model_DBLP(trial=None):
                     #dif_1= dif
                     if predictionCorrectionRelu=="True":
                         dif=F.relu( dif)
+                        #dif_neg=F.relu(dif)
                         
+                    labelLength=trainLabels.sum(1)
                     labelOneFlag=(trainLabels.sum(1)==1).int()
                     notLabelOneFlag=1-labelOneFlag
                 if predictionCorrectionTrainGamma==0:
-                    correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+                    if predictionCorrectionLabelLength=="True":
+                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif).mean(0)
+                    elif predictionCorrectionLabelLength=="False":
+                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+
                 elif predictionCorrectionTrainGamma>0:
                     correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*dif_neg*labelOneFlag)  ).mean(0)
                 print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
