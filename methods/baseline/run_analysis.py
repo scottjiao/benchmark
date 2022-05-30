@@ -95,6 +95,7 @@ ap.add_argument('--predictionCorrectionTrainBeta', type=float, default=0)  #
 ap.add_argument('--predictionCorrectionLabelLength', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionRelu', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionTrainGamma', type=float, default=0)  #
+ap.add_argument('--LossCorrectionAbsDiff', type=str, default="False")  #
 
 
 
@@ -206,6 +207,7 @@ def run_model_DBLP(trial=None):
         predictionCorrectionRelu=args.predictionCorrectionRelu
         predictionCorrectionTrainGamma=args.predictionCorrectionTrainGamma
         predictionCorrectionLabelLength=args.predictionCorrectionLabelLength
+        LossCorrectionAbsDiff=args.LossCorrectionAbsDiff
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
         if res_n_type_mappings:
@@ -350,8 +352,12 @@ def run_model_DBLP(trial=None):
         g.etype_ids=etype_ids
 
 
-
-        loss = nn.BCELoss() if multi_labels else F.nll_loss
+        if LossCorrectionAbsDiff=="True":
+            reduc="none"
+        elif LossCorrectionAbsDiff=="False":
+            reduc="mean"
+        loss = nn.BCELoss(reduction=reduc) if multi_labels else F.nll_loss
+        loss_val = nn.BCELoss() if multi_labels else F.nll_loss
         g.edge_type_indexer=F.one_hot(e_feat).to(device)
 
         """if os.path.exists(f"./temp/{args.dataset}.nec"):
@@ -554,7 +560,18 @@ def run_model_DBLP(trial=None):
 
             logits,encoded_embeddings = net(features_list, e_feat) 
             logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
-            train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
+            if LossCorrectionAbsDiff=="True":
+                trainLabels=labels[train_idx]
+                with torch.no_grad():
+                    trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
+                    dif=trainLabels.sum(1)-trainPred.sum(1)
+                    dif=torch.abs(dif)
+                    sample_weights_one=torch.ones_like(dif)
+                    sample_weights=sample_weights_one+dif
+                train_loss = ((loss(logp[train_idx], labels[train_idx]).mean(1))*sample_weights).mean(0)
+            elif LossCorrectionAbsDiff=="False":
+                train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
+
             if predictionCorrectionTrainBeta!=0:
                 #on training
                 expLogits=torch.exp(-logits[train_idx].mean(1)) #核心就在于对logits均值的操控
@@ -633,7 +650,7 @@ def run_model_DBLP(trial=None):
             with torch.no_grad():
                 logits,_ = net(features_list, e_feat)
                 logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
-                val_loss = loss(logp[val_idx], labels[val_idx])
+                val_loss = loss_val(logp[val_idx], labels[val_idx])
             t_1_end = time.time()
             
             # print validation info
