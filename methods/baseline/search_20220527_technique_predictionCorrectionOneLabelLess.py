@@ -7,7 +7,7 @@ from threading import main_thread
 from pipeline_utils import get_best_hypers,run_command_in_parallel,config_study_name,Run
 import os
 
-dataset_to_evaluate=[("IMDB_corrected",2,10),]  # dataset,worker_num,repeat
+dataset_to_evaluate=[("IMDB_corrected",1,10),]  # dataset,worker_num,repeat
 
 prefix="technique";specified_args=["dataset",   "net",    "feats-type",     "slot_aggregator","predictionCorrectionTrainBeta","predictionCorrectionTrainGamma"]
 
@@ -15,12 +15,13 @@ prefix="technique";specified_args=["dataset",   "net",    "feats-type",     "slo
 fixed_info={"task_property":prefix,"net":"slotGAT","feats-type":1,"slot_aggregator":"average","predictionCorrectionRelu":"True"}
 task_to_evaluate=[
 #{"feats-type":"1","predicted_by_slot":"majority_voting"},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3e-1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3e-1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":1},
-{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3e-1},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":1},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":3e-1,"predictionCorrectionTrainGamma":3},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3e-1},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":1},
+#{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":6e-1,"predictionCorrectionTrainGamma":3},
+{"search_hidden_dim":"[64,128]","search_num_layers":"[2,3]","predictionCorrectionTrainBeta":1,"predictionCorrectionTrainGamma":1},
 ]
 gpus=["0","1"]
 total_trial_num=30

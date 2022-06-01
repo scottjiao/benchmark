@@ -833,11 +833,14 @@ def run_model_DBLP(trial=None):
                 true_label_length=len(lbs)
                 diff_length=len(pds)-len(lbs)
                 k=f"true_label_length:{true_label_length}/diff_length: {diff_length}"
+                k_length=f"true_label_length:{true_label_length}"
                 if k not in diff_len_idx["test"].keys():
-                    #diff_len_dict["test"][k]=0
                     diff_len_idx["test"][k]=[]
+                if k_length not in diff_len_idx["test"].keys():
+                    diff_len_idx["test"][k_length]=[]
                 #diff_len_dict["test"][k]+=1
                 diff_len_idx["test"][k].append(i)
+                diff_len_idx["test"][k_length].append(i)
             for k,idx_list in diff_len_idx["test"].items():
                 diff_len_results["test"][k]=dl.evaluate_by_group(pred,idx_list,train=False,mode="multi")
             #diff_len_dict["test"]=sorted([(k,v) for k,v in diff_len_dict["test"].items()])
