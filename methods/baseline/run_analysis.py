@@ -93,8 +93,9 @@ ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
 ap.add_argument('--predictionCorrectionTrainBeta', type=float, default=0)  #
 ap.add_argument('--predictionCorrectionLabelLength', type=str, default="False")  #
-ap.add_argument('--predictionCorrectionRelu', type=str, default="False")  #
+ap.add_argument('--predictionCorrectionRelu', type=str, default="True")  #
 ap.add_argument('--predictionCorrectionTrainGamma', type=float, default=0)  #
+ap.add_argument('--predCorIgnoreOneLabel', type=str, default="False")  #
 ap.add_argument('--LossCorrectionAbsDiff', type=str, default="False")  #
 
 
@@ -207,6 +208,7 @@ def run_model_DBLP(trial=None):
         predictionCorrectionRelu=args.predictionCorrectionRelu
         predictionCorrectionTrainGamma=args.predictionCorrectionTrainGamma
         predictionCorrectionLabelLength=args.predictionCorrectionLabelLength
+        predCorIgnoreOneLabel=args.predCorIgnoreOneLabel
         LossCorrectionAbsDiff=args.LossCorrectionAbsDiff
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
@@ -590,10 +592,18 @@ def run_model_DBLP(trial=None):
                     labelOneFlag=(trainLabels.sum(1)==1).int()
                     notLabelOneFlag=1-labelOneFlag
                 if predictionCorrectionTrainGamma==0:
+                    if predCorIgnoreOneLabel=="True":
+                        sampleFilter=notLabelOneFlag
+                    elif predCorIgnoreOneLabel=="False":
+                        sampleFilter=1
+                    else:
+                        raise Exception
                     if predictionCorrectionLabelLength=="True":
-                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif).mean(0)
+                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif*sampleFilter).mean(0)
                     elif predictionCorrectionLabelLength=="False":
-                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif).mean(0)
+                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif*sampleFilter).mean(0)
+                    else:
+                        raise Exception
 
                 elif predictionCorrectionTrainGamma>0:
                     correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*dif_neg*labelOneFlag)  ).mean(0)
