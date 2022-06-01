@@ -7,7 +7,7 @@ from threading import main_thread
 from pipeline_utils import get_best_hypers,run_command_in_parallel,config_study_name,Run
 import os
 
-time.sleep(60*60*3)
+time.sleep(60*60*4)
 
 
 dataset_to_evaluate=[("IMDB_corrected",2,10),]  # dataset,worker_num,repeat
