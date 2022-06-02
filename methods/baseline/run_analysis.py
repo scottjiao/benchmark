@@ -593,11 +593,12 @@ def run_model_DBLP(trial=None):
                     notLabelOneFlag=1-labelOneFlag
                 if predictionCorrectionTrainGamma==0:
                     if predCorIgnoreOneLabel=="True":
-                        sampleFilter=notLabelOneFlag
+                        sampleFilter=notLabelOneFlag  #n
                     elif predCorIgnoreOneLabel=="False":
                         sampleFilter=1
                     else:
                         raise Exception
+                        
                     if predictionCorrectionLabelLength=="True":
                         correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif*sampleFilter).mean(0)
                     elif predictionCorrectionLabelLength=="False":
