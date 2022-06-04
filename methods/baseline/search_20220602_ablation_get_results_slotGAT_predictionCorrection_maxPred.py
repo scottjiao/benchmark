@@ -14,9 +14,12 @@ prefix="ablation";specified_args=["dataset",   "net",    "feats-type",     "slot
 
 fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","get_out":"True"}
 task_to_evaluate=[
-{"feats-type":"1","predictionCorrectionTrainBeta":1,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
-{"feats-type":"1","predictionCorrectionTrainBeta":1.5,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
-{"feats-type":"1","predictionCorrectionTrainBeta":2,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+{"feats-type":"1","predictionCorrectionTrainBeta":0.2,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+{"feats-type":"1","predictionCorrectionTrainBeta":0.5,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+{"feats-type":"1","predictionCorrectionTrainBeta":0.8,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+#{"feats-type":"1","predictionCorrectionTrainBeta":1,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+#{"feats-type":"1","predictionCorrectionTrainBeta":1.5,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
+#{"feats-type":"1","predictionCorrectionTrainBeta":2,"predictionCorrectionRelu":"True","predicted_by_slot":"max"},
 ]
 gpus=["1"]
 total_trial_num=1
