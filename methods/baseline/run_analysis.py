@@ -88,6 +88,7 @@ ap.add_argument('--attention_0_type_bigger_constraint', type=float, default=0)
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
+ap.add_argument('--get_out_tsne', default="False")  
 ap.add_argument('--get_test_for_online', default="False")  
 ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
@@ -216,6 +217,7 @@ def run_model_DBLP(trial=None):
         predictionCorrectionBetaAbs=args.predictionCorrectionBetaAbs
         n_type_mappings=eval(args.n_type_mappings)
         res_n_type_mappings=eval(args.res_n_type_mappings)
+        get_out_tsne=args.get_out_tsne
         if res_n_type_mappings:
             assert n_type_mappings 
         multi_labels=True if args.dataset in ["IMDB","IMDB_corrected","IMDB_corrected_oracle"] else False
@@ -923,20 +925,21 @@ def run_model_DBLP(trial=None):
             #vis_data_saver.collect_whole_process([x.tolist() for x in net.scale_analysis ],name=f"scale_analysis")
             #vis_data_saver.collect_whole_process(net.ties_ratio_1,name=f"ties_ratio_1")
             #vis_data_saver.collect_whole_process(net.ties_ratio_2,name=f"ties_ratio_2")
-            #for i in range(num_layers):
-                #for head in range(num_heads):
-                #    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
-                #    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_head,bins=10,range=(0,1))[0])]
-                #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_head_{head}")
-                #for etype in range(num_etype):
-                #    attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
-                #    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
-                #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
-                #vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
-                #for nt in tqdm(range(net.gat_layers[i].emb.shape[0])):
-                #    #x_emb=TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(net.gat_layers[i].emb[nt].squeeze(0).numpy())
-                #    #vis_data_saver.collect_whole_process_tensor(  ,name=f"emb_layer_{i}")
-                #    #vis_data_saver.collect_whole_process( x_emb.tolist() ,name=f"tsne_emb_layer_{i}_slot_{nt}")
+            if get_out_tsne=="True":
+                for i in range(num_layers):
+                    #for head in range(num_heads):
+                    #    attentions_i_head=net.gat_layers[i].attentions[:,head,:].squeeze(-1).cpu().numpy()
+                    #    attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_head,bins=10,range=(0,1))[0])]
+                    #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_head_{head}")
+                    #for etype in range(num_etype):
+                    #    attentions_i_et=net.gat_layers[i].attentions[etype_ids[etype],:,:].flatten().cpu().numpy()
+                     #   attention_hist_i_head=[int(x) for x in list(np.histogram(attentions_i_et,bins=10,range=(0,1))[0])]
+                    #    vis_data_saver.collect_whole_process( attention_hist_i_head ,name=f"attention_hist_layer_{i}_et_{etype}")
+                    #vis_data_saver.collect_whole_process( net.gat_layers[i].attn_correlation ,name=f"attn_correlation_layer_{i}_et_0_1")
+                    for nt in tqdm(range(net.gat_layers[i].emb.shape[0])):
+                        x_emb=TSNE(n_components=2, learning_rate='auto', init='pca').fit_transform(net.gat_layers[i].emb[nt].squeeze(0).numpy())
+                        #vis_data_saver.collect_whole_process_tensor(  ,name=f"emb_layer_{i}")
+                        vis_data_saver.collect_whole_process( x_emb.tolist() ,name=f"tsne_emb_layer_{i}_slot_{nt}")
 
 
 
