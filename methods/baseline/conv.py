@@ -253,11 +253,11 @@ class slotGATConv(nn.Module):
         self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
 
         if isinstance(in_feats, tuple):
+            raise Exception("!!!")
             self.fc_src = nn.Linear(
                 self._in_src_feats, out_feats * num_heads, bias=False)
             self.fc_dst = nn.Linear(
                 self._in_dst_feats, out_feats * num_heads, bias=False)
-            raise Exception("!!!")
         else:
             if not n_type_mappings:
                 self.fc = nn.Parameter(th.FloatTensor(size=(self.num_ntype, self._in_src_feats, out_feats * num_heads)))
