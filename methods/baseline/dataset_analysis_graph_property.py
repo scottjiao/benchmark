@@ -532,8 +532,8 @@ def analysis(dataset,net,get_logits_way="average"):
 #        analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")
 
-for dataset in [
-                        "IMDB_corrected_oracle","IMDB_corrected",]:
+for dataset in ["pubmed_HNE_complete"]:
+                        #"IMDB_corrected_oracle","IMDB_corrected",]:
     for net in ["slotGAT"]:
         analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")

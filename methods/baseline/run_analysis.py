@@ -23,7 +23,7 @@ from sklearn.manifold import TSNE
 
 from tqdm import tqdm
 
-
+import json
 
 
 
@@ -414,7 +414,11 @@ def run_model_DBLP(trial=None):
         etype_specified_attention=eval(args.etype_specified_attention)
         #eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
         eindexer=None
-
+        if args.get_out=="True":
+            
+            f = open("./analysis/"+f"dataset_info_{args.dataset}"+".json", 'w')
+            json.dump({"node_idx_by_ntype":g.node_idx_by_ntype}, f, indent=4)
+            f.close()
 
     normalize=args.normalize
     LP_alpha=args.LP_alpha
