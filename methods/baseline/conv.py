@@ -12,6 +12,7 @@ from dgl.utils import expand_as_pair
 import torch
 import torch.nn.functional as F
 import numpy as np
+from torch.profiler import profile, record_function, ProfilerActivity
 # pylint: disable=W0235
 class slotGCNConv(nn.Module):
     

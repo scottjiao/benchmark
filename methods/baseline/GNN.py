@@ -8,6 +8,7 @@ from dgl.nn.pytorch import GraphConv
 import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax, GATConv
 from conv import myGATConv,HCGNNConv,changedGATConv,slotGATConv,slotGCNConv
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from dgl._ffi.base import DGLError
 
@@ -28,7 +29,7 @@ class slotGTN(nn.Module):
                     dropout,
                     num_ntype,
                     normalize,
-                    ntype_indexer
+                    ntype_indexer,get_out="False"
                     ):
         super(slotGTN,self).__init__()
         
@@ -297,7 +298,7 @@ class slotGCN(nn.Module):
                  num_classes,
                  num_layers,
                  activation,
-                 dropout,num_ntype,aggregator,slot_trans,ntype_indexer,semantic_trans,semantic_trans_normalize):
+                 dropout,num_ntype,aggregator,slot_trans,ntype_indexer,semantic_trans,semantic_trans_normalize,get_out="False"):
         super(slotGCN, self).__init__()
         self.g = g
         self.num_ntype=num_ntype
@@ -381,7 +382,7 @@ class slotGAT(nn.Module):
                  etype_specified_attention,
                  eindexer,
                  ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,predicted_by_slot="None",
-                 addLogitsEpsilon=0,addLogitsTrain="None"):
+                 addLogitsEpsilon=0,addLogitsTrain="None",get_out="False"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -424,96 +425,100 @@ class slotGAT(nn.Module):
         assert aggregator in (["onedimconv","average","last_fc","slot_majority_voting","max"]+self.by_slot)
         if self.aggregator=="onedimconv":
             self.nt_aggr=nn.Parameter(torch.FloatTensor(1,1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
+        self.get_out=get_out
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
     def forward(self, features_list, e_feat):
-
-        encoded_embeddings=None
-        h = []
-        for nt_id,(fc, feature) in enumerate(zip(self.fc_list, features_list)):
-            nt_ft=fc(feature)
-            emsen_ft=torch.zeros([nt_ft.shape[0],nt_ft.shape[1]*self.num_ntype]).to(feature.device)
-            emsen_ft[:,nt_ft.shape[1]*nt_id:nt_ft.shape[1]*(nt_id+1)]=nt_ft
-            h.append(emsen_ft)   # the id is decided by the node types
-        h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
-        res_attn = None
-        for l in range(self.num_layers):
-            h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)   #num_nodes*num_heads*(num_ntype*hidden_dim)
-            h = h.flatten(1)#num_nodes*(num_heads*num_ntype*hidden_dim)
-            #if self.ae_layer=="last_hidden":
-            encoded_embeddings=h
-        # output projection
-        logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
+        with record_function("model_forward"):
+            encoded_embeddings=None
+            h = []
+            for nt_id,(fc, feature) in enumerate(zip(self.fc_list, features_list)):
+                nt_ft=fc(feature)
+                emsen_ft=torch.zeros([nt_ft.shape[0],nt_ft.shape[1]*self.num_ntype]).to(feature.device)
+                emsen_ft[:,nt_ft.shape[1]*nt_id:nt_ft.shape[1]*(nt_id+1)]=nt_ft
+                h.append(emsen_ft)   # the id is decided by the node types
+            h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
+            res_attn = None
+            for l in range(self.num_layers):
+                h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)   #num_nodes*num_heads*(num_ntype*hidden_dim)
+                h = h.flatten(1)#num_nodes*(num_heads*num_ntype*hidden_dim)
+                #if self.ae_layer=="last_hidden":
+                encoded_embeddings=h
+            # output projection
+            logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
         #average across the ntype info
         if self.predicted_by_slot!="None" and self.training==False:
-            logits=logits.view(-1,1,self.num_ntype,self.num_classes)
-            self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0)
-            if self.predicted_by_slot in ["majority_voting","majority_voting_max"] :
-                logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
-                with torch.no_grad():
-                    slot_votings=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
-                    slot_votings_onehot=F.one_hot(slot_votings)## num_nodes * num_ntypes *num_classes
-                    votings_count=slot_votings_onehot.sum(1) ## num_nodes  *num_classes
-                    votings_max_count=votings_count.max(1)[0] ## num_nodes 
-                    ties_flags_pos=(votings_max_count.unsqueeze(-1)==votings_count)   ## num_nodes  *num_classes
-                    ties_flags=ties_flags_pos.sum(-1)>1   ## num_nodes 
-                    ties_ids=ties_flags.int().nonzero().flatten().tolist()   ## num_nodes 
-                    voting_patterns=torch.sort(votings_count,descending=True,dim=-1)[0]  #num_nodes  *num_classes
-                    pattern_counts={}
-                    ties_labels={}
-                    ties_first_labels={}
-                    ties_second_labels={}
-                    ties_third_labels={}
-                    ties_fourth_labels={}
-                    for i in range(voting_patterns.shape[0]):
-                        if i in self.g.node_idx_by_ntype[0]:
-                            pattern=tuple(voting_patterns[i].flatten().tolist())
-                            if pattern not in pattern_counts.keys():
-                                pattern_counts[pattern]=0
-                            pattern_counts[pattern]+=1
-
-                    for i in ties_ids:
-                        ties_labels[i]=ties_flags_pos[i].nonzero().flatten().tolist()
-                        ties_first_labels[i]=ties_labels[i][0]
-                        ties_second_labels[i]=ties_first_labels[i] if len(ties_labels[i])<2 else ties_labels[i][1]
-                        ties_third_labels[i]=ties_second_labels[i] if len(ties_labels[i])<3 else ties_labels[i][2]
-                        ties_fourth_labels[i]=ties_third_labels[i] if len(ties_labels[i])<4 else ties_labels[i][3]
-                            
-                    self.majority_voting_analysis={"pattern_counts":pattern_counts,"ties_first_labels":ties_first_labels,"ties_second_labels":ties_second_labels,"ties_third_labels":ties_third_labels,"ties_fourth_labels":ties_fourth_labels,"ties_labels":ties_labels,"ties_ids":ties_ids}
-
-                    ## num_nodes *num_classes
-                    votings=torch.argmax(F.one_hot(torch.argmax(logits,dim=-1)).sum(1),dim=-1)  #num_nodes
-                    #num_nodes*1
-                    votings_int=(slot_votings==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
-                    self.votings_int=votings_int
-                    self.voting_patterns=voting_patterns
-
-
-                if self.predicted_by_slot=="majority_voting_max":
-                    logits=(logits*votings_int).max(1,keepdim=True)[0] #num_nodes *  1 *num_classes
-                else:
-                    logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
-            elif self.predicted_by_slot=="max":
-                logits=logits.max(2)[0]
-            else:
-                target_slot=int(self.predicted_by_slot)
-                logits=logits[:,:,target_slot,:].squeeze(2)
-        else:
-            if self.aggregator=="average":
-                logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
-            elif self.aggregator=="onedimconv":
-                logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
-            elif self.aggregator=="last_fc":
+            with record_function("predict_by_slot"):
                 logits=logits.view(-1,1,self.num_ntype,self.num_classes)
-                logits=logits.flatten(1)
-                logits=logits.matmul(self.last_fc).unsqueeze(1)
-            elif self.aggregator=="max":
-                logits=logits.view(-1,1,self.num_ntype,self.num_classes).max(2)[0]
+                self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0) if self.get_out=="True" else None
+                if self.predicted_by_slot in ["majority_voting","majority_voting_max"] :
+                    logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
+                    with torch.no_grad():
+                        slot_votings=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
+                        if self.get_out=="True":
+                            slot_votings_onehot=F.one_hot(slot_votings)## num_nodes * num_ntypes *num_classes
+                            votings_count=slot_votings_onehot.sum(1) ## num_nodes  *num_classes
+                            votings_max_count=votings_count.max(1)[0] ## num_nodes 
+                            ties_flags_pos=(votings_max_count.unsqueeze(-1)==votings_count)   ## num_nodes  *num_classes
+                            ties_flags=ties_flags_pos.sum(-1)>1   ## num_nodes 
+                            ties_ids=ties_flags.int().nonzero().flatten().tolist()   ## num_nodes 
+                            voting_patterns=torch.sort(votings_count,descending=True,dim=-1)[0]  #num_nodes  *num_classes
+                            pattern_counts={}
+                            ties_labels={}
+                            ties_first_labels={}
+                            ties_second_labels={}
+                            ties_third_labels={}
+                            ties_fourth_labels={}
+                            for i in range(voting_patterns.shape[0]):
+                                if i in self.g.node_idx_by_ntype[0]:
+                                    pattern=tuple(voting_patterns[i].flatten().tolist())
+                                    if pattern not in pattern_counts.keys():
+                                        pattern_counts[pattern]=0
+                                    pattern_counts[pattern]+=1
+
+                            for i in ties_ids:
+                                ties_labels[i]=ties_flags_pos[i].nonzero().flatten().tolist()
+                                ties_first_labels[i]=ties_labels[i][0]
+                                ties_second_labels[i]=ties_first_labels[i] if len(ties_labels[i])<2 else ties_labels[i][1]
+                                ties_third_labels[i]=ties_second_labels[i] if len(ties_labels[i])<3 else ties_labels[i][2]
+                                ties_fourth_labels[i]=ties_third_labels[i] if len(ties_labels[i])<4 else ties_labels[i][3]
+                                    
+                            self.majority_voting_analysis={"pattern_counts":pattern_counts,"ties_first_labels":ties_first_labels,"ties_second_labels":ties_second_labels,"ties_third_labels":ties_third_labels,"ties_fourth_labels":ties_fourth_labels,"ties_labels":ties_labels,"ties_ids":ties_ids}
+
+                        ## num_nodes *num_classes
+                        votings=torch.argmax(F.one_hot(torch.argmax(logits,dim=-1)).sum(1),dim=-1)  #num_nodes
+                        #num_nodes*1
+                        votings_int=(slot_votings==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
+                        self.votings_int=votings_int
+                        self.voting_patterns=voting_patterns  if self.get_out=="True" else None
+
+
+                    if self.predicted_by_slot=="majority_voting_max":
+                        logits=(logits*votings_int).max(1,keepdim=True)[0] #num_nodes *  1 *num_classes
+                    else:
+                        logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
+                elif self.predicted_by_slot=="max":
+                    logits=logits.max(2)[0]
+                else:
+                    target_slot=int(self.predicted_by_slot)
+                    logits=logits[:,:,target_slot,:].squeeze(2)
+        else:
+            with record_function("slot_aggregation"):
+                if self.aggregator=="average":
+                    logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+                elif self.aggregator=="onedimconv":
+                    logits=(logits.view(-1,1,self.num_ntype,self.num_classes)*F.softmax(self.leaky_relu(self.nt_aggr),dim=2)).sum(2)
+                elif self.aggregator=="last_fc":
+                    logits=logits.view(-1,1,self.num_ntype,self.num_classes)
+                    logits=logits.flatten(1)
+                    logits=logits.matmul(self.last_fc).unsqueeze(1)
+                elif self.aggregator=="max":
+                    logits=logits.view(-1,1,self.num_ntype,self.num_classes).max(2)[0]
 
 
 
-            else:
-                raise NotImplementedError()
+                else:
+                    raise NotImplementedError()
         #average across the heads
         ### logits = [num_nodes *  num_of_heads *num_classes]
         self.logits_mean=logits.flatten().mean()
@@ -539,7 +544,7 @@ class attGTN(nn.Module):
                     heads,
                     activation,
                     dropout,
-                    residual
+                    residual,get_out="False"
                     ):
         super(attGTN,self).__init__()
         
@@ -695,7 +700,7 @@ class GTN(nn.Module):
                     num_convs,
                     heads,
                     activation,
-                    dropout
+                    dropout,get_out="False"
                     ):
         super(GTN,self).__init__()
         
@@ -857,7 +862,7 @@ class changedGAT(nn.Module):
                  res_n_type_mappings,
                  etype_specified_attention,
                  eindexer,
-                 ae_layer):
+                 ae_layer,get_out="False"):
         super(changedGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -932,7 +937,7 @@ class myGAT(nn.Module):
                  attn_drop,
                  negative_slope,
                  residual,
-                 alpha):
+                 alpha,get_out="False"):
         super(myGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -988,7 +993,7 @@ class RGAT(nn.Module):
                  feat_drop,
                  attn_drop,
                  negative_slope,
-                 residual):
+                 residual,get_out="False"):
         super(GAT, self).__init__()
         self.gs = gs
         self.num_layers = num_layers
@@ -1057,7 +1062,7 @@ class GAT(nn.Module):
                  feat_drop,
                  attn_drop,
                  negative_slope,
-                 residual):
+                 residual,get_out="False"):
         super(GAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -1102,7 +1107,7 @@ class GCN(nn.Module):
                  num_classes,
                  num_layers,
                  activation,
-                 dropout):
+                 dropout,get_out="False"):
         super(GCN, self).__init__()
         self.g = g
         self.layers = nn.ModuleList()

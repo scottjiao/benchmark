@@ -17,16 +17,14 @@ from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
-
+from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import tensorboard_trace_handler
 from sklearn.manifold import TSNE
 #import wandb
 
 from tqdm import tqdm
 
 import json
-
-
-
 
 
 
@@ -429,6 +427,13 @@ def run_model_DBLP(trial=None):
     mi_F1s=[]
     val_accs=[]
     val_losses_neg=[]
+    
+    def trace_handler(p):
+        output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=20)
+        print(output)
+        p.export_chrome_trace("./profiler/trace_"+args.study_name+"_" + str(p.step_num) + ".json")
+
+
     #wandb.init(project=args.study_name, 
     #        name=f"trial_num_{trial.number}",
     #        # Track hyperparameters and run metadata
@@ -471,32 +476,32 @@ def run_model_DBLP(trial=None):
         elif args.net=='changedGAT':
             #net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
             GNN=changedGAT
-            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,get_out=args.get_out)
         elif args.net=='slotGAT':
             GNN=slotGAT
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint,
-            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain)
+            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain,get_out=args.get_out)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
             GNN=GAT
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True,get_out=args.get_out)
         elif args.net=='GCN':
             #net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
             GNN=GCN
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,get_out=args.get_out)
         elif args.net=="slotGCN":
             #net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
             GNN=slotGCN
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,get_out=args.get_out)
         elif args.net=='GTN':
             #net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
             GNN=GTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,get_out=args.get_out)
         elif args.net=='attGTN':
             #net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
             GNN=attGTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual,get_out=args.get_out)
         elif args.net=='LabelPropagation':
             #net=LabelPropagation(num_layers, LP_alpha)
             GNN=LabelPropagation
@@ -508,7 +513,7 @@ def run_model_DBLP(trial=None):
         elif args.net=="slotGTN":
             #net=slotGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
             GNN=slotGTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer,get_out=args.get_out)
         else:
             raise NotImplementedError()
 
@@ -562,143 +567,149 @@ def run_model_DBLP(trial=None):
         #ntypes=None   #N*num_ntype
         
         #wandb.watch(net, log_freq=5)
-            
-        for epoch in range(args.epoch):
-            if args.net=="LabelPropagation"  :
-                continue
-            t_0_start = time.time()
-            # training
-            net.train()
-
-            logits,encoded_embeddings = net(features_list, e_feat) 
-            logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
-            if LossCorrectionAbsDiff=="True":
-                trainLabels=labels[train_idx]
-                with torch.no_grad():
-                    trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
-                    dif=trainLabels.sum(1)-trainPred.sum(1)
-                    dif=torch.abs(dif)
-                    sample_weights_one=torch.ones_like(dif)
-                    sample_weights=sample_weights_one+dif
-                train_loss = ((loss(logp[train_idx], labels[train_idx]).mean(1))*sample_weights).mean(0)
-            elif LossCorrectionAbsDiff=="False":
-                train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
-
-            if predictionCorrectionTrainBeta!=0:
-                #on training
-                expLogits=torch.exp(-logits[train_idx].mean(1)) #核心就在于对logits均值的操控
-                expLogits_neg=torch.exp(logits[train_idx].mean(1)) 
-                trainLabels=labels[train_idx]
-                with torch.no_grad():
-                    trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
-                    dif=trainLabels.sum(1)-trainPred.sum(1)
-                    dif_neg=trainPred.sum(1)-trainLabels.sum(1)
-                    #dif_1= dif
-                    if predictionCorrectionRelu=="True":
-                        dif=F.relu( dif)
-                        #dif_neg=F.relu(dif)
-                        
-                    labelLength=trainLabels.sum(1)
-                    labelOneFlag=(trainLabels.sum(1)==1).int()
-                    notLabelOneFlag=1-labelOneFlag
-                if predictionCorrectionTrainGamma==0:
-                    if predCorIgnoreOneLabel=="True":
-                        sampleFilter=notLabelOneFlag  #n
-                    elif predCorIgnoreOneLabel=="False":
-                        sampleFilter=1
-                    else:
-                        raise Exception
-                        
-                    if predictionCorrectionLabelLength=="True":
-                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif*sampleFilter).mean(0)
-                    elif predictionCorrectionLabelLength=="False":
-                        correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif*sampleFilter).mean(0)
-                    else:
-                        raise Exception
-
-                elif predictionCorrectionTrainGamma>0:
-                    correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*dif_neg*labelOneFlag)  ).mean(0)
-                print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
-                train_loss +=correctionLoss
-                
-
-
-
-
-
-            if attention_mse_weight_factor>0 or attention_1_type_bigger_constraint>0 or attention_0_type_bigger_constraint>0:
-                mse=0
-                t0_bigger_mse=0
-                t1_bigger_mse=0
-                for l in net.gat_layers:
-                    mse+=attention_mse_weight_factor*l.mse
-                    t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
-                    t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
-                print(f"Epoch:{epoch} loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
-                train_loss +=mse
-                train_loss +=t0_bigger_mse
-                train_loss +=t1_bigger_mse
-            #autoencoder for ntype
-            if ae_layer!="None":
-                if "decoder" not in dec_dic.keys():
-                    dec_dic["decoder"]=NTYPE_ENCODER(in_dim=encoded_embeddings.shape[1],hidden_dim=hidden_dim,out_dim=num_ntypes,dropout=args.dropout).to(device)
-                    
-                    print(dec_dic["decoder"])  if args.verbose=="True" else None
-                ntype_decoder=dec_dic["decoder"]
-                
-                #produce ntype logits
-                ntype_logits=ntype_decoder(encoded_embeddings)
-                #compute ntype loss
-                ntype_idx=torch.randperm(encoded_embeddings.shape[0])[:int(ntype_logits.shape[0]*ae_sampling_factor)].to(device)
-
-                logp_ntype = F.log_softmax(ntype_logits, 1)
-                ntype_acc=(logp_ntype[ntype_idx].argmax(1)==ntypes[ntype_idx]).float().mean()
-                train_loss+=F.nll_loss(logp_ntype[ntype_idx], ntypes[ntype_idx])
-
-            # autograd
-            optimizer.zero_grad()
-            train_loss.backward()
-            optimizer.step()
-
-            t_0_end = time.time()
-
-            # 
-            #print('Epoch {:05d} '.format(epoch, )
-
-            t_1_start = time.time()
-            # validation
-            net.eval()
-            with torch.no_grad():
-                logits,_ = net(features_list, e_feat)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,schedule=torch.profiler.schedule(
+                wait=2,
+                warmup=2,
+                active=6,
+                repeat=1),on_trace_ready=torch.profiler.tensorboard_trace_handler("./profiler/trace_"+args.study_name)) as prof:
+            for epoch in range(args.epoch):
+                if args.net=="LabelPropagation"  :
+                    continue
+                t_0_start = time.time()
+                # training
+                net.train()
+                with record_function("model_inference"):
+                    logits,encoded_embeddings = net(features_list, e_feat) 
                 logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
-                val_loss = loss_val(logp[val_idx], labels[val_idx])
-            t_1_end = time.time()
+                if LossCorrectionAbsDiff=="True":
+                    trainLabels=labels[train_idx]
+                    with torch.no_grad():
+                        trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
+                        dif=trainLabels.sum(1)-trainPred.sum(1)
+                        dif=torch.abs(dif)
+                        sample_weights_one=torch.ones_like(dif)
+                        sample_weights=sample_weights_one+dif
+                    train_loss = ((loss(logp[train_idx], labels[train_idx]).mean(1))*sample_weights).mean(0)
+                elif LossCorrectionAbsDiff=="False":
+                    train_loss = loss(logp[train_idx], labels[train_idx])# if not multi_labels else loss(logp[train_idx], labels[train_idx])
+
+                if predictionCorrectionTrainBeta!=0:
+                    #on training
+                    expLogits=torch.exp(-logits[train_idx].mean(1)) #核心就在于对logits均值的操控
+                    expLogits_neg=torch.exp(logits[train_idx].mean(1)) 
+                    trainLabels=labels[train_idx]
+                    with torch.no_grad():
+                        trainPred = logits[train_idx].argmax(axis=1) if not multi_labels else (logits[train_idx]>0).int()
+                        dif=trainLabels.sum(1)-trainPred.sum(1)
+                        dif_neg=trainPred.sum(1)-trainLabels.sum(1)
+                        #dif_1= dif
+                        if predictionCorrectionRelu=="True":
+                            dif=F.relu( dif)
+                            #dif_neg=F.relu(dif)
+                            
+                        labelLength=trainLabels.sum(1)
+                        labelOneFlag=(trainLabels.sum(1)==1).int()
+                        notLabelOneFlag=1-labelOneFlag
+                    if predictionCorrectionTrainGamma==0:
+                        if predCorIgnoreOneLabel=="True":
+                            sampleFilter=notLabelOneFlag  #n
+                        elif predCorIgnoreOneLabel=="False":
+                            sampleFilter=1
+                        else:
+                            raise Exception
+                            
+                        if predictionCorrectionLabelLength=="True":
+                            correctionLoss=predictionCorrectionTrainBeta*(expLogits*labelLength*dif*sampleFilter).mean(0)
+                        elif predictionCorrectionLabelLength=="False":
+                            correctionLoss=predictionCorrectionTrainBeta*(expLogits*dif*sampleFilter).mean(0)
+                        else:
+                            raise Exception
+
+                    elif predictionCorrectionTrainGamma>0:
+                        correctionLoss=(predictionCorrectionTrainBeta*(expLogits*dif*notLabelOneFlag)+  predictionCorrectionTrainGamma*(expLogits_neg*dif_neg*labelOneFlag)  ).mean(0)
+                    print(f"Epoch\t{epoch}|train_loss\t{train_loss}|correctionLoss\t{correctionLoss}")  if args.verbose=="True" else None
+                    train_loss +=correctionLoss
+                    
+
+
+
+
+
+                if attention_mse_weight_factor>0 or attention_1_type_bigger_constraint>0 or attention_0_type_bigger_constraint>0:
+                    mse=0
+                    t0_bigger_mse=0
+                    t1_bigger_mse=0
+                    for l in net.gat_layers:
+                        mse+=attention_mse_weight_factor*l.mse
+                        t1_bigger_mse+=attention_1_type_bigger_constraint*l.t1_bigger_mse
+                        t0_bigger_mse+=attention_0_type_bigger_constraint*l.t0_bigger_mse
+                    print(f"Epoch:{epoch} loss: {train_loss.item()}, attention mse: {mse.item()}, t1 bigger mse: {t1_bigger_mse.item()}, t0 bigger mse: {t0_bigger_mse.item()}") if args.verbose=="True" else None
+                    train_loss +=mse
+                    train_loss +=t0_bigger_mse
+                    train_loss +=t1_bigger_mse
+                #autoencoder for ntype
+                if ae_layer!="None":
+                    if "decoder" not in dec_dic.keys():
+                        dec_dic["decoder"]=NTYPE_ENCODER(in_dim=encoded_embeddings.shape[1],hidden_dim=hidden_dim,out_dim=num_ntypes,dropout=args.dropout).to(device)
+                        
+                        print(dec_dic["decoder"])  if args.verbose=="True" else None
+                    ntype_decoder=dec_dic["decoder"]
+                    
+                    #produce ntype logits
+                    ntype_logits=ntype_decoder(encoded_embeddings)
+                    #compute ntype loss
+                    ntype_idx=torch.randperm(encoded_embeddings.shape[0])[:int(ntype_logits.shape[0]*ae_sampling_factor)].to(device)
+
+                    logp_ntype = F.log_softmax(ntype_logits, 1)
+                    ntype_acc=(logp_ntype[ntype_idx].argmax(1)==ntypes[ntype_idx]).float().mean()
+                    train_loss+=F.nll_loss(logp_ntype[ntype_idx], ntypes[ntype_idx])
+
+                # autograd
+                optimizer.zero_grad()
+                with record_function("model_backward"):
+                    train_loss.backward()
+                    optimizer.step()
+
+                t_0_end = time.time()
+
+                # 
+                #print('Epoch {:05d} '.format(epoch, )
+
+                t_1_start = time.time()
+                # validation
+                net.eval()
+                with torch.no_grad():
+                    logits,_ = net(features_list, e_feat)
+                    logp = F.log_softmax(logits, 1) if not multi_labels else F.sigmoid(logits)
+                    val_loss = loss_val(logp[val_idx], labels[val_idx])
+                t_1_end = time.time()
+                
+                # print validation info
+                if not  multi_labels:
+                    
+                    val_logits = logits[val_idx]
+                    pred = val_logits.argmax(axis=1)
+                    val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
+                    #wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
+                    print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | val Time(s) {:.4f} val acc: {:.4f}'.format(
+                    epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
+                if args.get_out=="True":
+                    if args.selection_weight_average=="True":
+                        w=net.W.flatten(0).cpu().tolist()
+                        if args.verbose=="True":
+                            print(w)
+                        vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
+                        vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
+                        vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
+                        vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
+                    
+                # early stopping
+                early_stopping(val_loss, net)
+                if epoch>args.epoch/2 and early_stopping.early_stop:
+                    #print('Early stopping!')
+                    break
+                prof.step()
             
-            # print validation info
-            if not  multi_labels:
-                
-                val_logits = logits[val_idx]
-                pred = val_logits.argmax(axis=1)
-                val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
-                #wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
-                print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | train Time(s) {:.4f} val acc: {:.4f}'.format(
-                epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None
-            if args.get_out=="True":
-                if args.selection_weight_average=="True":
-                    w=net.W.flatten(0).cpu().tolist()
-                    if args.verbose=="True":
-                        print(w)
-                    vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
-                    vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
-                    vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
-                    vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
-                
-            # early stopping
-            early_stopping(val_loss, net)
-            if epoch>args.epoch/2 and early_stopping.early_stop:
-                #print('Early stopping!')
-                break
-        
         # validation with evaluate_results_nc
         if not multi_labels:
             if args.net!="LabelPropagation":
@@ -771,6 +782,13 @@ def run_model_DBLP(trial=None):
     if args.get_out=="True":
 
         if args.net=="slotGAT":
+
+
+            logitsNegDist=[(f"number of samples with {i}/{logits.shape[1]} negative logit",int(((logits<0).float().sum(1)==i).float().sum())) for i in range(logits.shape[1]+1)]
+            vis_data_saver.collect_whole_process(logitsNegDist   ,name=f"logitsNegDist")
+
+
+
             #print(net.logits_mean)
             #print(net.scale_analysis)
             #net.majority_voting_analysis["pattern_counts"]
