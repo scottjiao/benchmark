@@ -428,7 +428,7 @@ class slotGAT(nn.Module):
         self.get_out=get_out
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
-    def forward(self, features_list, e_feat):
+    def forward(self, features_list,e_feat, get_out="False"):
         with record_function("model_forward"):
             encoded_embeddings=None
             h = []
@@ -440,12 +440,12 @@ class slotGAT(nn.Module):
             h = torch.cat(h, 0)        #  num_nodes*(num_type*hidden_dim)
             res_attn = None
             for l in range(self.num_layers):
-                h, res_attn = self.gat_layers[l](self.g, h, e_feat, res_attn=res_attn)   #num_nodes*num_heads*(num_ntype*hidden_dim)
+                h, res_attn = self.gat_layers[l](self.g, h, e_feat,get_out=get_out, res_attn=res_attn)   #num_nodes*num_heads*(num_ntype*hidden_dim)
                 h = h.flatten(1)#num_nodes*(num_heads*num_ntype*hidden_dim)
                 #if self.ae_layer=="last_hidden":
                 encoded_embeddings=h
             # output projection
-            logits, _ = self.gat_layers[-1](self.g, h, e_feat, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
+            logits, _ = self.gat_layers[-1](self.g, h, e_feat,get_out=get_out, res_attn=None)   #num_nodes*num_heads*num_ntype*hidden_dim
         #average across the ntype info
         if self.predicted_by_slot!="None" and self.training==False:
             with record_function("predict_by_slot"):

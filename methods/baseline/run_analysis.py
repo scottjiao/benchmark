@@ -13,7 +13,7 @@ import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
-from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector
+from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector,blank_profile
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
@@ -86,7 +86,11 @@ ap.add_argument('--attention_0_type_bigger_constraint', type=float, default=0)
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
+ap.add_argument('--profile', default="False")  
 ap.add_argument('--get_out_tsne', default="False")  
+
+
+
 ap.add_argument('--get_test_for_online', default="False")  
 ap.add_argument('--addLogitsEpsilon', type=float, default=1e-5)  #
 ap.add_argument('--addLogitsTrain', type=str, default="False")  #
@@ -565,9 +569,13 @@ def run_model_DBLP(trial=None):
         
         dec_dic={}
         #ntypes=None   #N*num_ntype
-        
+        if args.profile=="True":
+            profile_func=profile
+        elif args.profile=="False":
+            profile_func=blank_profile
+
         #wandb.watch(net, log_freq=5)
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,schedule=torch.profiler.schedule(
+        with profile_func(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True,schedule=torch.profiler.schedule(
                 wait=2,
                 warmup=2,
                 active=6,
@@ -716,7 +724,7 @@ def run_model_DBLP(trial=None):
                 net.load_state_dict(torch.load(ckp_fname))
             net.eval()
             with torch.no_grad():
-                logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
+                logits,_ = net(features_list, e_feat,get_out=args.get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
                 val_logits = logits[val_idx]
                 pred = val_logits.argmax(axis=1)
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
@@ -739,7 +747,7 @@ def run_model_DBLP(trial=None):
         net.eval()
         test_logits = []
         with torch.no_grad():
-            logits,_ = net(features_list, e_feat) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
+            logits,_ = net(features_list, e_feat,get_out=args.get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             if re==0:
                 logits_save=logits
                 featW=net.W.flatten(0).cpu().tolist() if args.selection_weight_average=="True" else None

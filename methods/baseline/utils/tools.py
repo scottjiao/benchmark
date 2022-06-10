@@ -15,7 +15,15 @@ from matplotlib import pyplot as plt
 def func_args_parse(*args,**kargs):
     return args,kargs
 
-
+class blank_profile():
+    def __init__(self,*args,**kwargs):
+        pass
+    def __enter__(self,*args,**kwargs):
+        return self
+    def __exit__(self,*args,**kwargs):
+        pass
+    def step(self):
+        pass
 
 class vis_data_collector():
     #all data must be simple python objects like int or 'str'
