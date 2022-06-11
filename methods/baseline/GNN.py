@@ -891,7 +891,7 @@ class changedGAT(nn.Module):
             feat_drop, attn_drop, negative_slope, residual, None, alpha=alpha,num_ntype=num_ntype,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer))
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
-    def forward(self, features_list, e_feat):
+    def forward(self, features_list, e_feat,get_out="False"):
 
         hidden_logits=None
         h = []
