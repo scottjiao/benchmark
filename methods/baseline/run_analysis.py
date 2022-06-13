@@ -77,7 +77,9 @@ ap.add_argument('--verbose', type=str, default="False")
 ap.add_argument('--ae_layer', type=str, default="None")  #"last_hidden", "None"
 ap.add_argument('--ae_sampling_factor', type=float, default=0.01)  
 ap.add_argument('--slot_aggregator', type=str, default="None")
+ap.add_argument('--slot_attention', type=str, default="False") #
 ap.add_argument('--predicted_by_slot', type=str, default="None")
+
 ap.add_argument('--attention_average', type=str, default="False")
 ap.add_argument('--attention_mse_sampling_factor', type=float, default=0)  
 ap.add_argument('--attention_mse_weight_factor', type=float, default=0)  
@@ -203,6 +205,7 @@ def run_model_DBLP(trial=None):
         delete_type_nodes=args.delete_type_nodes
         attention_average=args.attention_average
         predicted_by_slot=args.predicted_by_slot
+        slot_attention=args.slot_attention
         attention_mse_sampling_factor=args.attention_mse_sampling_factor
         attention_mse_weight_factor=args.attention_mse_weight_factor
         attention_1_type_bigger_constraint=args.attention_1_type_bigger_constraint
@@ -484,7 +487,7 @@ def run_model_DBLP(trial=None):
         elif args.net=='slotGAT':
             GNN=slotGAT
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint,
-            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain,get_out=args.get_out)
+            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain,get_out=args.get_out,slot_attention=slot_attention)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)

@@ -230,7 +230,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,slot_attention="False"):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -252,6 +252,7 @@ class slotGATConv(nn.Module):
         self.attention_mse_weight_factor=attention_mse_weight_factor
         self.attention_1_type_bigger_constraint=attention_1_type_bigger_constraint
         self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
+        self.slot_attention=slot_attention
 
         if isinstance(in_feats, tuple):
             raise Exception("!!!")
@@ -270,10 +271,12 @@ class slotGATConv(nn.Module):
         if self.etype_specified_attention:
             self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats,num_etypes)))
-
+        elif self.slot_attention=="True":
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads,self.num_ntype, out_feats)))
+            self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads,self.num_ntype, out_feats)))
+            self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads,1, edge_feats))) if edge_feats else None
         else:
-            
-            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
+            self.attn_l = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats   *self.num_ntype)))
             self.attn_r = nn.Parameter(th.FloatTensor(size=(1, num_heads, out_feats*self.num_ntype)))
             self.attn_e = nn.Parameter(th.FloatTensor(size=(1, num_heads, edge_feats))) if edge_feats else None
         self.feat_drop = nn.Dropout(feat_drop)
@@ -415,7 +418,12 @@ class slotGATConv(nn.Module):
             else:
                 e_feat = self.edge_emb(e_feat) if self._edge_feats else None
                 e_feat = self.fc_e(e_feat).view(-1, self._num_heads, self._edge_feats)  if self._edge_feats else None
-                ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1) if self._edge_feats else 0
+                
+                if self.slot_attention=="True":
+                    feat_src=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
+                    feat_dst=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
+                    e_feat = e_feat.unsqueeze(2)  if self._edge_feats else None
+                ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1) if self._edge_feats else 0  #(-1, self._num_heads, 1) 
                 el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
                 er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
                 graph.srcdata.update({'ft': feat_src, 'el': el})
@@ -429,11 +437,14 @@ class slotGATConv(nn.Module):
                 e = self.leaky_relu(e)
             # compute softmax
             a=self.attn_drop(edge_softmax(graph, e))
-            graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
-            e_reverse=graph.edata.pop('e_reverse')
-            e_reverse=e_reverse+ee
-            e_reverse = self.leaky_relu(e_reverse)
-            a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
+            """if self.attention_average=="True" or self.attention_mse_sampling_factor>0:
+                graph.apply_edges(fn.u_add_v('er', 'el', 'e_reverse'))
+                e_reverse=graph.edata.pop('e_reverse')
+                e_reverse=e_reverse+ee
+                e_reverse = self.leaky_relu(e_reverse)
+                a_reverse=self.attn_drop(edge_softmax(graph, e_reverse,norm_by='src'))
+                cor_vec=torch.stack([a[graph.etype_ids[1]].flatten(),a_reverse[graph.etype_ids[1]].flatten()],dim=0)
+                self.attn_correlation=np.corrcoef(cor_vec.detach().cpu())[0,1]
             if self.attention_average=="True":
                 
 
@@ -444,7 +455,6 @@ class slotGATConv(nn.Module):
                 #choosed_nodes=graph.etype_ids[1][choosed_nodes_indices]
                 mse=torch.mean((a[choosed_edges]-a_reverse[choosed_edges])**2,dim=[0,1,2])
                 self.mse=mse
-                
             else:
                 self.mse=torch.tensor(0)
             if self.attention_1_type_bigger_constraint>0:
@@ -454,9 +464,7 @@ class slotGATConv(nn.Module):
             if self.attention_0_type_bigger_constraint>0:
                 self.t0_bigger_mse=torch.mean((1-a[graph.etype_ids[0]])**2,dim=[0,1,2])
             else:
-                self.t0_bigger_mse=torch.tensor(0)
-            cor_vec=torch.stack([a[graph.etype_ids[1]].flatten(),a_reverse[graph.etype_ids[1]].flatten()],dim=0)
-            self.attn_correlation=np.corrcoef(cor_vec.detach().cpu())[0,1]
+                self.t0_bigger_mse=torch.tensor(0)"""
             
             #print("a mean",[round(a[graph.etype_ids[i]].mean().item(),3) for i in range(7)],"a_reverse mean",[round(a_reverse[graph.etype_ids[i]].mean().item(),3) for i in range(7)])
 
@@ -468,6 +476,8 @@ class slotGATConv(nn.Module):
                              fn.sum('m', 'ft'))
                              
             rst = graph.dstdata['ft']
+            if self.slot_attention=="True":
+                rst=rst.flatten(2)
             # residual
             if self.res_fc is not None:
                 if not self.res_n_type_mappings:
