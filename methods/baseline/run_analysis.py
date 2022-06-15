@@ -13,7 +13,7 @@ import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
-from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector,blank_profile
+from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector,blank_profile,writeIntoCsvLogger
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
@@ -434,7 +434,7 @@ def run_model_DBLP(trial=None):
     mi_F1s=[]
     val_accs=[]
     val_losses_neg=[]
-    
+    toCsvRepetition=[]
     def trace_handler(p):
         output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=20)
         print(output)
@@ -729,11 +729,34 @@ def run_model_DBLP(trial=None):
             with torch.no_grad():
                 logits,_ = net(features_list, e_feat,get_out=args.get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
                 val_logits = logits[val_idx]
-                pred = val_logits.argmax(axis=1)
+                pred = val_logits.argmax(axis=1);all_pred=logits.argmax(axis=1)
                 val_acc=((pred==labels[val_idx]).int().sum()/(pred==labels[val_idx]).shape[0]).item()
             val_accs.append(val_acc)
 
-            
+            val_results=dl.evaluate_by_group(all_pred,val_idx,train=True)
+            test_results=dl.evaluate_by_group(all_pred,test_idx,train=False)
+            toCsv={ "1_featType":feats_type,
+                    "1_numLayers":num_layers,
+                    "1_hiddenDim":hidden_dim,
+                    "1_numOfHeads":num_heads,
+                    "1_Lr":lr,
+                    "1_Wd":weight_decay,
+                    "2_valAcc":val_results["acc"],
+                    "2_valMiPre":val_results["micro-pre"],
+                    "2_valMaPre":val_results["macro-pre"],
+                    "2_valMiRec":val_results["micro-rec"],
+                    "2_valMaRec":val_results["macro-rec"],
+                    "2_valMiF1":val_results["micro-f1"],
+                    "2_valMaF1":val_results["macro-f1"],
+                    "3_testAcc":test_results["acc"],
+                    "3_testMiPre":test_results["micro-pre"],
+                    "3_testMaPre":test_results["macro-pre"],
+                    "3_testMiRec":test_results["micro-rec"],
+                    "3_testMaRec":test_results["macro-rec"],
+                    "3_testMiF1":test_results["micro-f1"],
+                    "3_testMaF1":test_results["macro-f1"], }
+            toCsvRepetition.append(toCsv)
+            #writeIntoCsvLogger(toCsv,f"./log/{args.study_name}.csv")
             score=sum(val_accs)/len(val_accs)
         else:
             val_losses_neg.append(1/(1+val_loss))
@@ -789,6 +812,22 @@ def run_model_DBLP(trial=None):
     print(exp_info);#print(net) if args.verbose=="True" else None
     print(f"trial.params: {str(trial.params)}")
     #print(optimizer) if args.verbose=="True" else None
+    toCsvAveraged={}
+    for tocsv in toCsvRepetition:
+        for name in tocsv.keys():
+            if name.startswith("1_"):
+                toCsvAveraged[name]=tocsv[name]
+            else:
+                if name not in toCsvAveraged.keys():
+                    toCsvAveraged[name]=[]
+                toCsvAveraged[name].append(tocsv[name])
+    
+    for name in toCsvAveraged.keys():
+        if not name.startswith("1_"):
+            toCsvAveraged[name]=sum(toCsvAveraged[name])/len(toCsvAveraged[name])
+    #toCsvAveraged["5_expInfo"]=exp_info
+
+    writeIntoCsvLogger(toCsvAveraged,f"./log/{args.study_name}.csv")
 
     if args.get_out=="True":
 

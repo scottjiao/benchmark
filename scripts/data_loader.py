@@ -2,7 +2,7 @@ import os
 import numpy as np
 import scipy.sparse as sp
 from collections import Counter, defaultdict
-from sklearn.metrics import f1_score,multilabel_confusion_matrix
+from sklearn.metrics import f1_score,multilabel_confusion_matrix,accuracy_score,auc,precision_score,recall_score
 import time
 import copy
 
@@ -192,6 +192,7 @@ class data_loader:
         return result
 
     def evaluate_by_group(self,pred,group_ids,train=False,mode="bi"):
+        #pred should be all-prediction
         if len(group_ids)<1:
             return {'micro-f1': "NoNodes",'macro-f1': "NoNodes",}
         if train:
@@ -199,7 +200,10 @@ class data_loader:
         else:
             labels=self.labels_test['data']
         labels=labels[group_ids]
-        pred=pred[group_ids]
+        if mode=="bi":
+            labels=labels.argmax(-1)
+        y_true=labels
+        pred=pred[group_ids].cpu().detach()
         micro = f1_score(labels, pred, average='micro')
         macro = f1_score(labels, pred, average='macro')
         result = {
@@ -207,9 +211,17 @@ class data_loader:
             'macro-f1': macro,
             'num':len(group_ids)
         }
-        #if  mode=='multi':
+        if  mode=='multi':
             #mcm=multilabel_confusion_matrix(labels, pred)
             #result.update({"mcm":str(mcm)})
+            pass
+        elif mode=="bi":
+            result["acc"]=accuracy_score(labels,pred)
+            result["micro-pre"]=precision_score(y_true,pred, average='micro')
+            result["macro-pre"]=precision_score(y_true,pred, average='macro')
+            result["micro-rec"]=recall_score(y_true, pred, average='micro')
+            result["macro-rec"]=recall_score(y_true, pred, average='macro')
+
         return result
         
 
