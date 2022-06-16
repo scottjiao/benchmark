@@ -90,6 +90,7 @@ ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
 ap.add_argument('--get_out', default="False")  
 ap.add_argument('--profile', default="False")  
 ap.add_argument('--get_out_tsne', default="False")  
+ap.add_argument('--using_optuna', default="True")  
 
 
 
@@ -179,12 +180,20 @@ def run_model_DBLP(trial=None):
     weight_decay=trial.suggest_categorical("weight_decay", [5e-4,1e-4,1e-5])
     hidden_dim=trial.suggest_categorical("hidden_dim", [64,128])
     num_layers=trial.suggest_categorical("num_layers", [2])"""
-    num_heads=trial.suggest_categorical("num_heads", eval(args.search_num_heads))
-    lr=trial.suggest_categorical("lr", eval(args.search_lr))
-    weight_decay=trial.suggest_categorical("weight_decay", eval(args.search_weight_decay))
-    hidden_dim=trial.suggest_categorical("hidden_dim", eval(args.search_hidden_dim))
-    num_layers=trial.suggest_categorical("num_layers", eval(args.search_num_layers))
-    lr_times_on_filter_GTN=trial.suggest_categorical("lr_times_on_filter_GTN", eval(args.search_lr_times_on_filter_GTN))
+    if trial!=None:
+        num_heads=trial.suggest_categorical("num_heads", eval(args.search_num_heads))
+        lr=trial.suggest_categorical("lr", eval(args.search_lr))
+        weight_decay=trial.suggest_categorical("weight_decay", eval(args.search_weight_decay))
+        hidden_dim=trial.suggest_categorical("hidden_dim", eval(args.search_hidden_dim))
+        num_layers=trial.suggest_categorical("num_layers", eval(args.search_num_layers))
+        lr_times_on_filter_GTN=trial.suggest_categorical("lr_times_on_filter_GTN", eval(args.search_lr_times_on_filter_GTN))
+    else:
+        num_heads=int(eval(args.search_num_heads)[0]);assert len(eval(args.search_num_heads))==1
+        lr=float(eval(args.search_lr)[0]);assert len(eval(args.search_lr))==1
+        weight_decay=float(eval(args.search_weight_decay)[0]);assert len(eval(args.search_weight_decay))==1
+        hidden_dim=int(eval(args.search_hidden_dim)[0]);assert len(eval(args.search_hidden_dim))==1
+        num_layers=int(eval(args.search_num_layers)[0]);assert len(eval(args.search_num_layers))==1
+        lr_times_on_filter_GTN=float(eval(args.search_lr_times_on_filter_GTN)[0]);assert len(eval(args.search_lr_times_on_filter_GTN))==1
     
     if True:
         feats_type = args.feats_type
@@ -761,9 +770,10 @@ def run_model_DBLP(trial=None):
         else:
             val_losses_neg.append(1/(1+val_loss))
             score=sum(val_losses_neg)/len(val_losses_neg)
-        trial.report(score, re)
+        if trial:
+            trial.report(score, re)
         # Handle pruning based on the intermediate value.
-        if trial.should_prune():
+        if trial and trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
 
@@ -810,7 +820,8 @@ def run_model_DBLP(trial=None):
     vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(ma_F1s)) ),2),name="macro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(ma_F1s)) ),2),name="macro-f1-std");vis_data_saver.collect_whole_process(round(float(100*np.mean(np.array(mi_F1s)) ),2),name="micro-f1-mean");vis_data_saver.collect_whole_process(round(float(100*np.std(np.array(mi_F1s)) ),2),name="micro-f1-std")
     print(f"mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f}");print(f"mean and std of micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}")
     print(exp_info);#print(net) if args.verbose=="True" else None
-    print(f"trial.params: {str(trial.params)}")
+    if trial:
+        print(f"trial.params: {str(trial.params)}")
     #print(optimizer) if args.verbose=="True" else None
     toCsvAveraged={}
     for tocsv in toCsvRepetition:
@@ -1047,7 +1058,8 @@ def run_model_DBLP(trial=None):
         f.write(f"  multi_feat_weight: {str(net.W.flatten(0).cpu().tolist())} \n") if args.selection_weight_average=="True" else None
         f.write(f"score {  score :.4f}  mean and std of macro-f1: {  100*np.mean(np.array(ma_F1s)) :.1f}\u00B1{  100*np.std(np.array(ma_F1s)) :.1f} micro-f1: {  100*np.mean(np.array(mi_F1s)) :.1f}\u00B1{  100*np.std(np.array(mi_F1s)) :.1f}\n")
         f.write(str(exp_info)+"\n")
-        f.write(f"trial.params: {str(trial.params)}"+"\n")
+        if trial:
+            f.write(f"trial.params: {str(trial.params)}"+"\n")
         #f.write(str(net)+"\n")
     """ else:
         with open(fn,"w") as f:
@@ -1068,38 +1080,41 @@ if __name__ == '__main__':
 
     #torch.cuda.set_device(int(args.gpu))
     #device=torch.device(f"cuda:{int(args.gpu)}")
-    if args.study_name=="temp":
-        if os.path.exists("./db/temp.db"):
-            os.remove("./db/temp.db")
-    print("start search---------------")
-    study = optuna.create_study(study_name=args.study_name, storage=args.study_storage,direction="maximize",pruner=optuna.pruners.MedianPruner(),load_if_exists=True)
-    study.optimize(run_model_DBLP, n_trials=args.trial_num)
-    pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
-    complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
-    print("Study statistics: ")
-    print("  Number of finished trials: ", len(study.trials))
-    print("  Number of pruned trials: ", len(pruned_trials))
-    print("  Number of complete trials: ", len(complete_trials))
+    if args.using_optuna=="True":
+        if args.study_name=="temp":
+            if os.path.exists("./db/temp.db"):
+                os.remove("./db/temp.db")
+        print("start search---------------")
+        study = optuna.create_study(study_name=args.study_name, storage=args.study_storage,direction="maximize",pruner=optuna.pruners.MedianPruner(),load_if_exists=True)
+        study.optimize(run_model_DBLP, n_trials=args.trial_num)
+        pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
+        complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
+        print("Study statistics: ")
+        print("  Number of finished trials: ", len(study.trials))
+        print("  Number of pruned trials: ", len(pruned_trials))
+        print("  Number of complete trials: ", len(complete_trials))
 
-    print("Best trial:")
-    trial = study.best_trial
+        print("Best trial:")
+        trial = study.best_trial
 
 
 
 
-    print("  Value: ", trial.value)
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print("    {}: {}".format(key, value))
-    fn=os.path.join("log",args.study_name)
-    if os.path.exists(fn):
-        with open(fn,"a") as f:
-            
-            f.write("Best trial:\n")
-            f.write(f"  Value: {trial.value}\n", )
-            f.write("  Params: \n")
-            for key, value in trial.params.items():
-                f.write("    {}: {}\n".format(key, value))
+        print("  Value: ", trial.value)
+        print("  Params: ")
+        for key, value in trial.params.items():
+            print("    {}: {}".format(key, value))
+        fn=os.path.join("log",args.study_name)
+        if os.path.exists(fn):
+            with open(fn,"a") as f:
+                
+                f.write("Best trial:\n")
+                f.write(f"  Value: {trial.value}\n", )
+                f.write("  Params: \n")
+                for key, value in trial.params.items():
+                    f.write("    {}: {}\n".format(key, value))
+    else:
+        run_model_DBLP(trial=None)
 
 
 

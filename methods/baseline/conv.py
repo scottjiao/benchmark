@@ -423,6 +423,15 @@ class slotGATConv(nn.Module):
                     feat_src=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
                     feat_dst=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
                     e_feat = e_feat.unsqueeze(2)  if self._edge_feats else None
+                    #self.relevant_passing="False"
+                    #if self.relevant_passing=="True":
+                    #    node_self_slot_flag= graph.node_ntype_indexer   #self slot
+                    #    graph.srcdata.update({"self_slot_indexer_in":node_self_slot_flag})
+                    #    graph.dstdata.update({"self_slot_indexer_out":node_self_slot_flag})
+                    #    graph.apply_edges(fn.u_add_v('self_slot_indexer_in', 'self_slot_indexer_out', 'relevant_slot_flag'))
+                    #    relevant_slot_flag=graph.edata.pop('relevant_slot_flag')
+                    #    relevant_slot_flag=relevant_slot_flag.unsqueeze(1).unsqueeze(-1)
+                        #relevant_slot_flag=(relevant_slot_flag>0).int()
                 ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1) if self._edge_feats else 0  #(-1, self._num_heads, 1) 
                 el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
                 er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
@@ -467,7 +476,8 @@ class slotGATConv(nn.Module):
                 self.t0_bigger_mse=torch.tensor(0)"""
             
             #print("a mean",[round(a[graph.etype_ids[i]].mean().item(),3) for i in range(7)],"a_reverse mean",[round(a_reverse[graph.etype_ids[i]].mean().item(),3) for i in range(7)])
-
+            #if self.relevant_passing=="True":
+             #   a=a*relevant_slot_flag
             graph.edata['a'] = a
             if res_attn is not None:
                 graph.edata['a'] = graph.edata['a'] * (1-self.alpha) + res_attn * self.alpha
