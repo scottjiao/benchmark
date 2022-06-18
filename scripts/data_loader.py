@@ -211,16 +211,16 @@ class data_loader:
             'macro-f1': macro,
             'num':len(group_ids)
         }
-        if  mode=='multi':
+        #if  mode=='multi':
             #mcm=multilabel_confusion_matrix(labels, pred)
             #result.update({"mcm":str(mcm)})
-            pass
-        elif mode=="bi":
-            result["acc"]=accuracy_score(labels,pred)
-            result["micro-pre"]=precision_score(y_true,pred, average='micro')
-            result["macro-pre"]=precision_score(y_true,pred, average='macro')
-            result["micro-rec"]=recall_score(y_true, pred, average='micro')
-            result["macro-rec"]=recall_score(y_true, pred, average='macro')
+            #pass
+        #elif mode=="bi":
+        result["acc"]=accuracy_score(labels,pred)
+        result["micro-pre"]=precision_score(y_true,pred, average='micro')
+        result["macro-pre"]=precision_score(y_true,pred, average='macro')
+        result["micro-rec"]=recall_score(y_true, pred, average='micro')
+        result["macro-rec"]=recall_score(y_true, pred, average='macro')
 
         return result
         
