@@ -230,7 +230,7 @@ class slotGATConv(nn.Module):
                  allow_zero_in_degree=False,
                  bias=False,
                  alpha=0.,
-                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,slot_attention="False"):
+                 num_ntype=None,n_type_mappings=False,res_n_type_mappings=False,etype_specified_attention=False,eindexer=None,inputhead=False,semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,slot_attention="False",relevant_passing="False"):
         super(slotGATConv, self).__init__()
         self._edge_feats = edge_feats
         self._num_heads = num_heads
@@ -253,6 +253,7 @@ class slotGATConv(nn.Module):
         self.attention_1_type_bigger_constraint=attention_1_type_bigger_constraint
         self.attention_0_type_bigger_constraint=attention_0_type_bigger_constraint
         self.slot_attention=slot_attention
+        self.relevant_passing=relevant_passing
 
         if isinstance(in_feats, tuple):
             raise Exception("!!!")
@@ -423,15 +424,14 @@ class slotGATConv(nn.Module):
                     feat_src=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
                     feat_dst=feat_src.view(-1, self._num_heads,self.num_ntype, self._out_feats)
                     e_feat = e_feat.unsqueeze(2)  if self._edge_feats else None
-                    #self.relevant_passing="False"
-                    #if self.relevant_passing=="True":
-                    #    node_self_slot_flag= graph.node_ntype_indexer   #self slot
-                    #    graph.srcdata.update({"self_slot_indexer_in":node_self_slot_flag})
-                    #    graph.dstdata.update({"self_slot_indexer_out":node_self_slot_flag})
-                    #    graph.apply_edges(fn.u_add_v('self_slot_indexer_in', 'self_slot_indexer_out', 'relevant_slot_flag'))
-                    #    relevant_slot_flag=graph.edata.pop('relevant_slot_flag')
-                    #    relevant_slot_flag=relevant_slot_flag.unsqueeze(1).unsqueeze(-1)
-                        #relevant_slot_flag=(relevant_slot_flag>0).int()
+                    if self.relevant_passing=="True":
+                        node_self_slot_flag= graph.node_ntype_indexer   #self slot
+                        graph.srcdata.update({"self_slot_indexer_in":node_self_slot_flag})
+                        graph.dstdata.update({"self_slot_indexer_out":node_self_slot_flag})
+                        graph.apply_edges(fn.u_add_v('self_slot_indexer_in', 'self_slot_indexer_out', 'relevant_slot_flag'))
+                        relevant_slot_flag=graph.edata.pop('relevant_slot_flag')
+                        relevant_slot_flag=relevant_slot_flag.unsqueeze(1).unsqueeze(-1)
+                        relevant_slot_flag=(relevant_slot_flag>0).int()
                 ee = (e_feat * self.attn_e).sum(dim=-1).unsqueeze(-1) if self._edge_feats else 0  #(-1, self._num_heads, 1) 
                 el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
                 er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
@@ -476,11 +476,22 @@ class slotGATConv(nn.Module):
                 self.t0_bigger_mse=torch.tensor(0)"""
             
             #print("a mean",[round(a[graph.etype_ids[i]].mean().item(),3) for i in range(7)],"a_reverse mean",[round(a_reverse[graph.etype_ids[i]].mean().item(),3) for i in range(7)])
-            #if self.relevant_passing=="True":
-             #   a=a*relevant_slot_flag
-            graph.edata['a'] = a
+            #graph.edata['a'] = a
             if res_attn is not None:
-                graph.edata['a'] = graph.edata['a'] * (1-self.alpha) + res_attn * self.alpha
+                a=a * (1-self.alpha) + res_attn * self.alpha
+            if self.relevant_passing=="True":
+                degs_in = graph.in_degrees().float().clamp(min=1)
+                norm_in = th.pow(degs_in, -0.5)
+                degs_out = graph.out_degrees().float().clamp(min=1)
+                norm_out = th.pow(degs_out, -0.5)
+                graph.srcdata.update({'norm_in': norm_in})
+                graph.dstdata.update({'norm_out': norm_out})
+                graph.apply_edges(fn.u_mul_v('norm_in', 'norm_out', 'gcn_passing'))
+                gcn_passing=graph.edata.pop('gcn_passing').unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+                
+                a=a*relevant_slot_flag+gcn_passing*(1-relevant_slot_flag)
+
+            graph.edata['a'] = a
             # then message passing
             graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
                              fn.sum('m', 'ft'))
