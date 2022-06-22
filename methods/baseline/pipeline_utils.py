@@ -5,6 +5,35 @@ import subprocess
 import multiprocessing
 from threading import main_thread
 import os
+
+import copy
+
+def get_tasks(task_space):
+    tasks=[{}]
+    for k,v in task_space.items():
+        tasks=expand_task(tasks,k,v)
+    return tasks
+
+def expand_task(tasks,k,v):
+    temp_tasks=[]
+    if type(v) is str and type(eval(v)) is list:
+        for value in eval(v):
+            if k.startswith("search_"):
+                value=str([value])
+            for t in tasks:
+                temp_t=copy.deepcopy(t)
+                temp_t[k]=value
+                temp_tasks.append(temp_t)
+    else:
+        for t in tasks:
+            temp_t=copy.deepcopy(t)
+            temp_t[k]=v
+            temp_tasks.append(temp_t)
+    return temp_tasks
+    #if k.startswith("search_"):
+        ##list
+
+
 class Run( multiprocessing.Process):
     def __init__(self,command):
         super().__init__()

@@ -1,0 +1,65 @@
+
+
+import time
+import subprocess
+import multiprocessing
+from threading import main_thread
+from pipeline_utils import get_best_hypers,run_command_in_parallel,config_study_name,Run,get_tasks,expand_task
+import os
+import copy
+#time.sleep(60*60*4)
+
+
+dataset_to_evaluate=[("ACM_corrected",1,10),]  # dataset,worker_num,repeat
+
+prefix="technique_newCsv";specified_args=["dataset",   "net",      "slot_aggregator","slot_attention","relevant_passing"]
+
+
+fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","using_optuna":"False","slot_attention":"True","relevant_passing":"True"}
+task_space={"search_hidden_dim":"[64,128]","search_num_layers":"[2,3,4]","search_lr":"[5e-3,1e-3,5e-4,1e-4]","search_weight_decay":"[5e-3,1e-3,5e-4,1e-4]","feats-type":1}
+
+
+
+        
+task_to_evaluate=get_tasks(task_space)
+print(task_to_evaluate)
+gpus=["0"]
+total_trial_num=96
+
+
+for dataset,worker_num,repeat in dataset_to_evaluate:
+    for task in task_to_evaluate:
+        args_dict={}
+        for dict_to_add in [task,fixed_info]:
+            for k,v in dict_to_add.items():
+                args_dict[k]=v
+        net=args_dict['net']
+        ##################################
+        ##edit yes and no for filtering!##
+        ##################################
+        #yes=["technique",f"feat_type_{args_dict['feats-type']}",f"aggr_{args_dict['slot_aggregator']}"]
+        #yes=[]
+        #no=["attantion_average","attention_average","attention_mse","edge_feat_0","oracle"]
+        #best_hypers=get_best_hypers(dataset,net,yes,no)
+        #for dict_to_add in [best_hypers]:
+        #    for k,v in dict_to_add.items():
+        #        args_dict[k]=v
+        trial_num=int(total_trial_num/ (len(gpus)*worker_num) )
+        if trial_num<=1:
+            trial_num=1
+
+        args_dict['dataset']=dataset
+        args_dict['trial_num']=trial_num
+        args_dict['repeat']=repeat
+
+        study_name,study_storage=config_study_name(prefix=prefix,specified_args=specified_args,extract_dict=args_dict)
+        #study_name=f"get_embeddings_{dataset}_net_{task['net']}_feats_type_{task['feats-type']}_slot_aggregator{task['slot_aggregator']}"
+        #study_storage=f"sqlite:///db/{study_name}.db"
+        
+        args_dict['study_name']=study_name
+        args_dict['study_storage']=study_storage
+
+
+
+        run_command_in_parallel(args_dict,gpus,worker_num)
+
