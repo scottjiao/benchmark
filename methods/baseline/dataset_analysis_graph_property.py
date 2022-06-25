@@ -119,7 +119,7 @@ def analysis(dataset,net,get_logits_way="average"):
                 f"\n\tedge num: {adjM.nnz}"+\
                 f"\n\tclass num: {max(labels)+1}"+\
                 f"\n\tlabel num: {len(train_val_test_idx['train_idx'])+len(train_val_test_idx['val_idx'])+len(train_val_test_idx['test_idx'])} \n\t\ttrain labels num: {len(train_val_test_idx['train_idx'])}\n\t\tval labels num: {len(train_val_test_idx['val_idx'])}\n\t\ttest labels num: {len(train_val_test_idx['test_idx'])}"+"\n"+f"feature usage: {feature_usage_dict[feats_type]}"+"\n"+f"exp setting: {dataset}"+"\n"
-
+    print(exp_info)
     torch.manual_seed(1234)
     random.seed(1234)
     np.random.seed(1234)
@@ -204,8 +204,8 @@ def analysis(dataset,net,get_logits_way="average"):
     #with open(f"./temp/{args.dataset}_delete_ntype_{delete_type_nodes}.ett","wb") as f:
         #pickle.dump(edge2type,f)
         #pass
-            
-        
+    print("the meta information")   
+    print(dl.links['count'])
 
 
     g = dgl.DGLGraph(adjM+(adjM.T))
@@ -532,7 +532,7 @@ def analysis(dataset,net,get_logits_way="average"):
 #        analysis(dataset,net)
 #analysis("pubmed_HNE_complete","LabelPropagation")
 
-for dataset in ["pubmed_HNE_complete"]:
+for dataset in ["ACM"]:
                         #"IMDB_corrected_oracle","IMDB_corrected",]:
     for net in ["slotGAT"]:
         analysis(dataset,net)

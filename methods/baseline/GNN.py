@@ -266,7 +266,7 @@ class LabelPropagation(nn.Module):
         self.alpha = alpha
     
     @torch.no_grad()
-    def forward(self, g, labels, mask):    # labels.shape=(number of nodes of type 0)  may contain false labels, therefore here the mask argument which provides the training nodes' idx is important
+    def forward(self, g, labels, mask,get_out="False"):    # labels.shape=(number of nodes of type 0)  may contain false labels, therefore here the mask argument which provides the training nodes' idx is important
         with g.local_scope():
             if labels.dtype == torch.long:
                 labels = F.one_hot(labels.view(-1)).to(torch.float32)
@@ -1128,7 +1128,7 @@ class GCN(nn.Module):
         self.layers.append(GraphConv(num_hidden, num_classes))
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, features_list, e_feat):
+    def forward(self, features_list, e_feat,get_out="False"):
         h = []
         for fc, feature in zip(self.fc_list, features_list):
             h.append(fc(feature))

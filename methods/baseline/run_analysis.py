@@ -256,7 +256,8 @@ def run_model_DBLP(trial=None):
         print(exp_info) if args.verbose else None
         vis_data_saver=vis_data_collector()
         vis_data_saver.save_meta(exp_info,"exp_info")
-
+        running_time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(running_time)
         
         #check
         """
@@ -360,10 +361,11 @@ def run_model_DBLP(trial=None):
         counted_dict={}
         eid=0
         etype_ids={}
-        for u, v in tqdm(zip(*g.edges())):
+        g_=g.cpu()
+        for u, v in tqdm(zip(*g_.edges())):
             
-            u = u.cpu().item()
-            v = v.cpu().item()
+            u =u.item() #u.cpu().item()
+            v =v.item() #v.cpu().item()
             if not counted_dict.setdefault(edge2type[(u,v)],False) :
                 count_mappings[edge2type[(u,v)]]=count
                 counted_dict[edge2type[(u,v)]]=True
