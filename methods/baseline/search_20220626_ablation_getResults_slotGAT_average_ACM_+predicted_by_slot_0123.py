@@ -12,12 +12,12 @@ import copy
 
 dataset_to_evaluate=[("ACM_corrected",1,10),("IMDB_corrected",1,10),("DBLP_corrected",1,10),("pubmed_HNE_complete",1,20),]  # dataset,worker_num,repeat
 
-prefix="technique_newCsv";specified_args=["dataset",   "net",      "slot_aggregator","predicted_by_slot"]
+prefix="ablation";specified_args=["dataset",   "net",      "slot_aggregator","predicted_by_slot"]
 
 fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","using_optuna":"False"}
 task_space={"feats-type":1,"predicted_by_slot":["0","1","2","3"]}
 
-search_property="technique";yes=[f"slot_aggregator"]
+search_property="technique";yes_names=[f"slot_aggregator"]
 no=["attantion_average","attention_average","attention_mse","edge_feat_0","oracle"]
 
 def get_tasks(task_space):
@@ -68,7 +68,7 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
         ##################################
         ##edit yes and no for filtering!##
         ##################################
-        yes=proc_yes(yes,args_dict)
+        yes=proc_yes(yes_names,args_dict)
         yes.append(search_property)
         best_hypers=get_best_hypers_from_csv(dataset,net,yes,no)
         for dict_to_add in [best_hypers]:
