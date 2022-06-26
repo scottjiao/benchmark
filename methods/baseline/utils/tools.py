@@ -13,6 +13,23 @@ import json
 import pickle
 from matplotlib import pyplot as plt
 
+
+
+
+def count_torch_tensor(t):
+    t=t.flatten(0).cpu()
+    c={}
+    for n in t:
+        n=n.item()
+        if n not in c:
+            c[n]=0
+        c[n]+=1
+    c=sorted(list(c.items()),key=lambda x:x[0])
+    return c
+
+
+
+
 def strList(l):
     return [str(x) for x in l]
 

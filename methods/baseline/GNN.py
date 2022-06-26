@@ -382,7 +382,7 @@ class slotGAT(nn.Module):
                  etype_specified_attention,
                  eindexer,
                  ae_layer,aggregator="average",semantic_trans="False",semantic_trans_normalize="row",attention_average="False",attention_mse_sampling_factor=0,attention_mse_weight_factor=0,attention_1_type_bigger_constraint=0,attention_0_type_bigger_constraint=0,predicted_by_slot="None",
-                 addLogitsEpsilon=0,addLogitsTrain="None",get_out="False",slot_attention="False",relevant_passing="False"):
+                 addLogitsEpsilon=0,addLogitsTrain="None",get_out=[""],slot_attention="False",relevant_passing="False"):
         super(slotGAT, self).__init__()
         self.g = g
         self.num_layers = num_layers
@@ -430,7 +430,7 @@ class slotGAT(nn.Module):
         assert aggregator in (["onedimconv","average","last_fc","slot_majority_voting","max"]+self.by_slot)
         if self.aggregator=="onedimconv":
             self.nt_aggr=nn.Parameter(torch.FloatTensor(1,1,self.num_ntype,1));nn.init.normal_(self.nt_aggr,std=1)
-        self.get_out=get_out
+        #self.get_out=get_out
         self.epsilon = torch.FloatTensor([1e-12]).cuda()
 
     def forward(self, features_list,e_feat, get_out="False"):
@@ -455,12 +455,12 @@ class slotGAT(nn.Module):
         if self.predicted_by_slot!="None" and self.training==False:
             with record_function("predict_by_slot"):
                 logits=logits.view(-1,1,self.num_ntype,self.num_classes)
-                self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0) if self.get_out=="True" else None
+                self.scale_analysis=torch.std_mean(logits.squeeze(1).mean(dim=-1).detach().cpu(),dim=0) if get_out!=[""] else None
                 if self.predicted_by_slot in ["majority_voting","majority_voting_max"] :
                     logits=logits.squeeze(1)           # num_nodes * num_ntypes*num_classes
                     with torch.no_grad():
                         slot_votings=torch.argmax(logits,dim=-1)   # num_nodes * num_ntypes
-                        if self.get_out=="True":
+                        if "majorityVoting" in get_out:
                             slot_votings_onehot=F.one_hot(slot_votings)## num_nodes * num_ntypes *num_classes
                             votings_count=slot_votings_onehot.sum(1) ## num_nodes  *num_classes
                             votings_max_count=votings_count.max(1)[0] ## num_nodes 
@@ -495,7 +495,7 @@ class slotGAT(nn.Module):
                         #num_nodes*1
                         votings_int=(slot_votings==(votings.unsqueeze(1))).int().unsqueeze(-1)   # num_nodes *num_ntypes *1
                         self.votings_int=votings_int
-                        self.voting_patterns=voting_patterns  if self.get_out=="True" else None
+                        self.voting_patterns=voting_patterns  
 
 
                     if self.predicted_by_slot=="majority_voting_max":
@@ -504,6 +504,8 @@ class slotGAT(nn.Module):
                         logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
                 elif self.predicted_by_slot=="max":
                     logits=logits.max(2)[0]
+                    if "getMaxSlot" in  get_out:
+                        self.maxSlotIndexes=logits.max(2)[1]
                 else:
                     target_slot=int(self.predicted_by_slot)
                     logits=logits[:,:,target_slot,:].squeeze(2)

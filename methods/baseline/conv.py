@@ -342,7 +342,7 @@ class slotGATConv(nn.Module):
     def set_allow_zero_in_degree(self, set_value):
         self._allow_zero_in_degree = set_value
 
-    def forward(self, graph, feat, e_feat,get_out="False", res_attn=None):
+    def forward(self, graph, feat, e_feat,get_out=[""], res_attn=None):
         with graph.local_scope():
             node_idx_by_ntype=graph.node_idx_by_ntype
             if not self._allow_zero_in_degree:
@@ -394,7 +394,7 @@ class slotGATConv(nn.Module):
                         h_src=h_src.view(-1,self._num_heads,self.num_ntype,int(self._in_src_feats/self._num_heads))
                         h_src=torch.matmul(st_m,h_src)
                     h_dst=h_src=h_src.permute(2,0,1,3).flatten(2)  #num_ntype*num_nodes*(in_feat_dim)
-                    if get_out=="True":
+                    if "getEmb" in get_out:
                         self.emb=h_dst.cpu().detach()
                     #self.fc with num_ntype*(in_feat_dim)*(out_feats * num_heads)
                     

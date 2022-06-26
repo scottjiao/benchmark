@@ -13,7 +13,7 @@ import numpy as np
 import random
 from utils.pytorchtools import EarlyStopping
 from utils.data import load_data
-from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector,blank_profile,writeIntoCsvLogger
+from utils.tools import func_args_parse,single_feat_net,multi_feat_net,vis_data_collector,blank_profile,writeIntoCsvLogger,count_torch_tensor
 #from utils.tools import index_generator, evaluate_results_nc, parse_minibatch
 from GNN import myGAT,HeteroCGNN,changedGAT,GAT,GCN,NTYPE_ENCODER,GTN,attGTN,slotGAT,slotGCN,LabelPropagation,MLP,slotGTN
 import dgl
@@ -90,7 +90,8 @@ ap.add_argument('--attention_1_type_bigger_constraint', type=float, default=0)
 ap.add_argument('--attention_0_type_bigger_constraint', type=float, default=0)  
 ap.add_argument('--slot_trans', type=str, default="all")  #all, one
 ap.add_argument('--LP_alpha', type=float, default=0.5)  #1,0.99,0.5
-ap.add_argument('--get_out', default="False")  
+ap.add_argument('--get_out', default="")  
+#ap.add_argument('--get_out_tasks', default="")  
 ap.add_argument('--profile', default="False")  
 ap.add_argument('--get_out_tsne', default="False")  
 ap.add_argument('--using_optuna', default="True")  
@@ -219,6 +220,8 @@ def run_model_DBLP(trial=None):
         predicted_by_slot=args.predicted_by_slot
         slot_attention=args.slot_attention
         relevant_passing=args.relevant_passing
+
+        get_out=args.get_out.split("_")
 
         attention_mse_sampling_factor=args.attention_mse_sampling_factor
         attention_mse_weight_factor=args.attention_mse_weight_factor
@@ -436,7 +439,7 @@ def run_model_DBLP(trial=None):
         etype_specified_attention=eval(args.etype_specified_attention)
         #eindexer=g.edge_type_indexer.unsqueeze(1).unsqueeze(1)    #  num_edges*1*1*num_etype
         eindexer=None
-        if args.get_out=="True":
+        if "getDataset" in get_out:
             
             f = open("./analysis/"+f"dataset_info_{args.dataset}"+".json", 'w')
             json.dump({"node_idx_by_ntype":g.node_idx_by_ntype}, f, indent=4)
@@ -500,32 +503,32 @@ def run_model_DBLP(trial=None):
         elif args.net=='changedGAT':
             #net = changedGAT(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer)
             GNN=changedGAT
-            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,get_out=get_out)
         elif args.net=='slotGAT':
             GNN=slotGAT
             fargs,fkargs=func_args_parse(g, args.edge_feats, num_etype, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True, 0.05,num_ntype=num_ntypes,n_type_mappings=n_type_mappings,res_n_type_mappings=res_n_type_mappings,etype_specified_attention=etype_specified_attention,eindexer=eindexer,ae_layer=ae_layer,aggregator=slot_aggregator,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,attention_average=attention_average,attention_mse_sampling_factor=attention_mse_sampling_factor,attention_mse_weight_factor=attention_mse_weight_factor,attention_1_type_bigger_constraint=attention_1_type_bigger_constraint,attention_0_type_bigger_constraint=attention_0_type_bigger_constraint,
-            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain,get_out=args.get_out,slot_attention=slot_attention,relevant_passing=relevant_passing)
+            predicted_by_slot=predicted_by_slot,addLogitsEpsilon=addLogitsEpsilon,addLogitsTrain=addLogitsTrain,get_out=get_out,slot_attention=slot_attention,relevant_passing=relevant_passing)
             #net = slotGAT()
         elif args.net=='GAT':
             #net=GAT(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True)
             GNN=GAT
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, heads, F.elu, args.dropout, args.dropout, args.slope, True,get_out=get_out)
         elif args.net=='GCN':
             #net=GCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout)
             GNN=GCN
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,get_out=get_out)
         elif args.net=="slotGCN":
             #net=slotGCN(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize)
             GNN=slotGCN
-            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g, in_dims, hidden_dim, num_classes, num_layers, F.relu, args.dropout,num_ntype=num_ntypes,aggregator=slot_aggregator,slot_trans=slot_trans,ntype_indexer=ntype_indexer,semantic_trans=semantic_trans,semantic_trans_normalize=semantic_trans_normalize,get_out=get_out)
         elif args.net=='GTN':
             #net=GTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout)
             GNN=GTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,get_out=get_out)
         elif args.net=='attGTN':
             #net=attGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual)
             GNN=attGTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,args.residual,get_out=get_out)
         elif args.net=='LabelPropagation':
             #net=LabelPropagation(num_layers, LP_alpha)
             GNN=LabelPropagation
@@ -537,7 +540,7 @@ def run_model_DBLP(trial=None):
         elif args.net=="slotGTN":
             #net=slotGTN(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer)
             GNN=slotGTN
-            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer,get_out=args.get_out)
+            fargs,fkargs=func_args_parse(g,num_etype, in_dims, hidden_dim, num_classes, num_layers,num_heads, F.relu, args.dropout,num_ntype=num_ntypes,normalize=normalize,ntype_indexer=ntype_indexer,get_out=get_out)
         else:
             raise NotImplementedError()
 
@@ -721,15 +724,15 @@ def run_model_DBLP(trial=None):
                     #wandb.log({f"val_acc_{re}": val_acc, f"val_loss_{re}": val_loss.item(),f"Train_Loss_{re}":train_loss.item()})
                     print('Epoch {:05d} | Train_Loss: {:.4f} | train Time: {:.4f} | Val_Loss {:.4f} | val Time(s) {:.4f} val acc: {:.4f}'.format(
                     epoch, train_loss.item(), t_0_end-t_0_start,val_loss.item(), t_1_end - t_1_start ,     val_acc     )      ) if (args.verbose=="True" and epoch%5==0) else None"""
-                if args.get_out=="True":
-                    if args.selection_weight_average=="True":
-                        w=net.W.flatten(0).cpu().tolist()
-                        if args.verbose=="True":
-                            print(w)
-                        vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
-                        vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
-                        vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
-                        vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
+                if "selectionWeightAverage" in get_out:
+                    #if args.selection_weight_average=="True":
+                    w=net.W.flatten(0).cpu().tolist()
+                    if args.verbose=="True":
+                        print(w)
+                    vis_data_saver.collect_in_training(w[0],"w0",re,epoch);vis_data_saver.collect_in_training(w[1],"w1",re,epoch)
+                    vis_data_saver.collect_in_training(val_loss.item(),"val_loss",re,epoch)
+                    vis_data_saver.collect_in_training(val_acc,"val_acc",re,epoch)
+                    vis_data_saver.collect_in_training(train_loss.item(),"train_loss",re,epoch)
                     
                 # early stopping
                 early_stopping(val_loss, net)
@@ -743,7 +746,7 @@ def run_model_DBLP(trial=None):
             net.load_state_dict(torch.load(ckp_fname))
         net.eval()
         with torch.no_grad():
-            logits,_ = net(features_list, e_feat,get_out=args.get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
+            logits,_ = net(features_list, e_feat,get_out=get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             val_logits = logits[val_idx]
             #pred = val_logits.argmax(axis=1)
             #all_pred=logits.argmax(axis=1)
@@ -795,7 +798,7 @@ def run_model_DBLP(trial=None):
         net.eval()
         test_logits = []
         with torch.no_grad():
-            logits,_ = net(features_list, e_feat,get_out=args.get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
+            logits,_ = net(features_list, e_feat,get_out=get_out) if args.net!="LabelPropagation"  else net(g,labels,mask=train_idx)
             if re==0:
                 logits_save=logits
                 featW=net.W.flatten(0).cpu().tolist() if args.selection_weight_average=="True" else None
@@ -854,13 +857,19 @@ def run_model_DBLP(trial=None):
 
     writeIntoCsvLogger(toCsvAveraged,f"./log/{args.study_name}.csv")
 
-    if args.get_out=="True":
+    if get_out !=['']:
 
         if args.net=="slotGAT":
+            if "getMaxSlot" in  get_out:
+                for i,node_idx in enumerate(g.node_idx_by_ntype):
+                    selected_indexes=net.maxSlotIndexes[node_idx]
+                    c=count_torch_tensor(selected_indexes)
+                    print(f"node type  {i}, count results for max slots: {c}")
+                    vis_data_saver.collect_whole_process(f"{c}"   ,name=f"node type  {i}, count results for max slots")
 
 
-            logitsNegDist=[(f"number of samples with {i}/{logits.shape[1]} negative logit",int(((logits<0).float().sum(1)==i).float().sum())) for i in range(logits.shape[1]+1)]
-            vis_data_saver.collect_whole_process(logitsNegDist   ,name=f"logitsNegDist")
+            #logitsNegDist=[(f"number of samples with {i}/{logits.shape[1]} negative logit",int(((logits<0).float().sum(1)==i).float().sum())) for i in range(logits.shape[1]+1)]
+            #vis_data_saver.collect_whole_process(logitsNegDist   ,name=f"logitsNegDist")
 
 
 
@@ -919,7 +928,7 @@ def run_model_DBLP(trial=None):
                 result=dl.evaluate_by_group(pred,test_pat_ids,train=False,mode="multi")
                 vis_data_saver.collect_whole_process(result   ,name=f"results of pattern {pattern}(test)")"""
 
-            if multi_labels:    
+            if multi_labels and "getDiff" in get_out:    
                 pred = logits.cpu().numpy().argmax(axis=1) if not multi_labels else (logits.cpu().numpy()>0).astype(int)
                 #different predicted number of labels
                 #diff_len_dict={"train":{},"test":{}}
