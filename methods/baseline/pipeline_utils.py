@@ -5,6 +5,7 @@ import subprocess
 import multiprocessing
 from threading import main_thread
 import os
+import pandas as pd
 
 import copy
 
@@ -41,6 +42,74 @@ class Run( multiprocessing.Process):
     def run(self):
         
         subprocess.run(self.command,shell=True)
+
+def proc_yes(yes,args_dict):
+    temp_yes=[]
+    for name in yes:
+        temp_yes.append(f"{name}_{args_dict[name]}")
+    return temp_yes
+
+def get_best_hypers_from_csv(dataset,net,yes,no,metric="2_valAcc"):
+    print(f"yes: {yes}, no: {no}")
+    #get search best hypers
+    fns=[]
+    for root, dirs, files in os.walk("./log", topdown=False):
+        for name in files:
+            FLAG=1
+            if "old" in root:
+                continue
+            if ".py" in name:
+                continue
+            if ".txt" in name:
+                continue
+            if ".csv" not in name:
+                continue
+            for n in no:
+                if n in name:
+                    FLAG=0
+            for y in yes:
+                if y not in name:
+                    FLAG=0
+            if FLAG==0:
+                continue
+
+            if dataset in name:
+                name0=name.replace("_GTN","",1) if "kdd" not in name else name
+                if net in name0 :
+
+                    fn=os.path.join(root, name)
+                    fns.append(fn)
+    score_max=0
+    print(fns)
+    if fns==[]:
+        raise Exception
+    for fn in fns:
+
+        param_data=pd.read_csv(fn)
+        param_data_sorted=param_data.sort_values(by="2_valAcc",ascending=False).head(1)
+        #print(param_data_sorted.columns)
+        param_mapping={"1_Lr":"search_lr",
+        "1_Wd":"search_weight_decay",
+        "1_featType":"feats-type",
+        "1_hiddenDim":"search_hidden_dim",
+        "1_numLayers":"search_num_layers",
+        "1_numOfHeads":"search_num_heads",}
+        score=param_data_sorted["2_valAcc"].iloc[0]
+        if score<score_max:
+            continue
+        else:
+            best_hypers={}
+            score_max=score
+            print(   f"score:{score}\t {param_data_sorted}  "  )
+            for col_name in param_data_sorted.columns:
+                if col_name.startswith("1_"):
+                    if param_mapping[col_name].startswith("search_"):
+                        best_hypers[param_mapping[col_name]]=f"[{param_data_sorted[col_name].iloc[0]}]"
+                    else:
+                        best_hypers[param_mapping[col_name]]=f"{param_data_sorted[col_name].iloc[0]}"
+        
+
+    return best_hypers
 
 def get_best_hypers(dataset,net,yes,no):
     print(f"yes: {yes}, no: {no}")

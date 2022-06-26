@@ -171,7 +171,10 @@ torch.manual_seed(1234)
 
 def run_model_DBLP(trial=None):
     #data preparation
-    dataset="ACM_corrected"
+    #dataset="ACM_corrected"
+    #dataset="IMDB_corrected"
+    #dataset="DBLP_corrected"
+    dataset="pubmed_HNE_complete"
     num_layers=1
     
     
