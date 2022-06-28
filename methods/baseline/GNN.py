@@ -503,9 +503,16 @@ class slotGAT(nn.Module):
                     else:
                         logits=(logits*votings_int).sum(1,keepdim=True) #num_nodes *  1 *num_classes
                 elif self.predicted_by_slot=="max":
-                    logits=logits.max(2)[0]
                     if "getMaxSlot" in  get_out:
-                        self.maxSlotIndexes=logits.max(2)[1]
+                        maxSlotIndexesWithLabels=logits.max(2)[1].squeeze(1)
+                        logits_indexer=logits.max(2)[0].max(2)[1]
+                        self.maxSlotIndexes=torch.gather(maxSlotIndexesWithLabels,1,logits_indexer)
+                    logits=logits.max(2)[0]
+                elif self.predicted_by_slot=="all":
+                    if "getSlots" in get_out:
+                        self.logits=logits.detach()
+                    logits=logits.view(-1,1,self.num_ntype,self.num_classes).mean(2)
+
                 else:
                     target_slot=int(self.predicted_by_slot)
                     logits=logits[:,:,target_slot,:].squeeze(2)

@@ -9,12 +9,14 @@ import os
 import copy
 #time.sleep(60*60*4)
 
+metric_mapping={"IMDB_corrected":"2_valMaF1","ACM_corrected":"2_valAcc","DBLP_corrected":"2_valAcc","pubmed_HNE_complete":"2_valAcc"}
 
-dataset_to_evaluate=[("ACM_corrected",1,10),("IMDB_corrected",1,10),("DBLP_corrected",1,10),("pubmed_HNE_complete",1,20),]  # dataset,worker_num,repeat
 
-prefix="ablation_newCsv";specified_args=["dataset",   "net",      "slot_aggregator","predicted_by_slot"]
+dataset_to_evaluate=[("ACM_corrected",1,1),("IMDB_corrected",1,1),("DBLP_corrected",1,1),("pubmed_HNE_complete",1,1),]  # dataset,worker_num,repeat
 
-fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","using_optuna":"False","predicted_by_slot":"max"}
+prefix="ablation_newCsv";specified_args=["dataset",   "net",      "slot_aggregator","predicted_by_slot","get_out"]
+
+fixed_info={"task_property":prefix,"net":"slotGAT","slot_aggregator":"average","using_optuna":"False","predicted_by_slot":"max","get_out":"getMaxSlot"}
 task_space={"feats-type":1,}
 
 search_property="technique";yes_names=[f"slot_aggregator","predicted_by_slot"]
@@ -54,7 +56,7 @@ def expand_task(tasks,k,v):
         
 task_to_evaluate=get_tasks(task_space)
 print(task_to_evaluate)
-gpus=["0"]
+gpus=["1"]
 total_trial_num=1
 
 
@@ -70,7 +72,7 @@ for dataset,worker_num,repeat in dataset_to_evaluate:
         ##################################
         yes=proc_yes(yes_names,args_dict)
         yes.append(search_property)
-        best_hypers=get_best_hypers_from_csv(dataset,net,yes,no)
+        best_hypers=get_best_hypers_from_csv(dataset,net,yes,no,metric=metric_mapping[dataset])
         for dict_to_add in [best_hypers]:
             for k,v in dict_to_add.items():
                 args_dict[k]=v

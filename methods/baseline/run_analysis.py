@@ -455,6 +455,7 @@ def run_model_DBLP(trial=None):
     val_accs=[]
     val_losses_neg=[]
     toCsvRepetition=[]
+    slotPerformance={}
     def trace_handler(p):
         output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=20)
         print(output)
@@ -707,7 +708,7 @@ def run_model_DBLP(trial=None):
                 #print('Epoch {:05d} '.format(epoch, )
 
                 t_1_start = time.time()
-                # validation
+                #validation
                 net.eval()
                 with torch.no_grad():
                     logits,_ = net(features_list, e_feat)
@@ -792,6 +793,24 @@ def run_model_DBLP(trial=None):
             raise optuna.exceptions.TrialPruned()
 
 
+        #get out
+        if predicted_by_slot=="all" and "getSlots" in get_out:
+            for target_slot in range(len(g.node_idx_by_ntype)):
+                slot_logits=net.logits[:,:,target_slot,:].squeeze(2).cpu()
+                slot_logits = slot_logits.mean(1)
+                #slot_logits = slot_logits / (torch.max(torch.norm(slot_logits, dim=1, keepdim=True), net.epsilon))
+                slot_pred=slot_logits.argmax(axis=1) if not multi_labels else (slot_logits>0).int()
+                slot_val_results=dl.evaluate_by_group(slot_pred,val_idx,train=True,mode=dl_mode)
+                slot_test_results=dl.evaluate_by_group(slot_pred,test_idx,train=False,mode=dl_mode)
+                if f"slot_{target_slot}" not in slotPerformance.keys():
+                    slotPerformance[f"slot_{target_slot}"]={}
+                for m in ["micro-f1","macro-f1"]:
+                    if m not in slotPerformance[f"slot_{target_slot}"].keys():
+                        slotPerformance[f"slot_{target_slot}"][m]=[]
+                    slotPerformance[f"slot_{target_slot}"][m].append(slot_test_results[f"{m}"])
+
+
+
         # testing with evaluate_results_nc
         if args.net!="LabelPropagation":
             net.load_state_dict(torch.load(ckp_fname)) 
@@ -866,7 +885,14 @@ def run_model_DBLP(trial=None):
                     c=count_torch_tensor(selected_indexes)
                     print(f"node type  {i}, count results for max slots: {c}")
                     vis_data_saver.collect_whole_process(f"{c}"   ,name=f"node type  {i}, count results for max slots")
-
+            
+            if predicted_by_slot=="all" and "getSlots" in get_out:
+                
+                for   k,d in  slotPerformance.items():
+                    
+                    # , d["macro-f1"]
+                    vis_data_saver.collect_whole_process( f"{100*np.array(d['micro-f1']).mean():.1f}+{100*np.array(d['micro-f1']).std():.1f}/{100*np.array(d['macro-f1']).mean():.1f}+{100*np.array(d['macro-f1']).std():.1f}"  ,name=k+"mean")
+                    #vis_data_saver.collect_whole_process(np.array(v).std()   ,name=k+"std" )
 
             #logitsNegDist=[(f"number of samples with {i}/{logits.shape[1]} negative logit",int(((logits<0).float().sum(1)==i).float().sum())) for i in range(logits.shape[1]+1)]
             #vis_data_saver.collect_whole_process(logitsNegDist   ,name=f"logitsNegDist")

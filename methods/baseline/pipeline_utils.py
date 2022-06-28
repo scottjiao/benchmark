@@ -86,7 +86,7 @@ def get_best_hypers_from_csv(dataset,net,yes,no,metric="2_valAcc"):
     for fn in fns:
 
         param_data=pd.read_csv(fn)
-        param_data_sorted=param_data.sort_values(by="2_valAcc",ascending=False).head(1)
+        param_data_sorted=param_data.sort_values(by=metric,ascending=False).head(1)
         #print(param_data_sorted.columns)
         param_mapping={"1_Lr":"search_lr",
         "1_Wd":"search_weight_decay",
@@ -94,19 +94,19 @@ def get_best_hypers_from_csv(dataset,net,yes,no,metric="2_valAcc"):
         "1_hiddenDim":"search_hidden_dim",
         "1_numLayers":"search_num_layers",
         "1_numOfHeads":"search_num_heads",}
-        score=param_data_sorted["2_valAcc"].iloc[0]
-        if score<score_max:
-            continue
-        else:
+        score=param_data_sorted[metric].iloc[0]
+        if score>score_max:
+            print(   f"score:{score}\t {param_data_sorted} bigger than current score {score_max} "  )
             best_hypers={}
             score_max=score
-            print(   f"score:{score}\t {param_data_sorted}  "  )
+            best_param_data_sorted=param_data_sorted
             for col_name in param_data_sorted.columns:
                 if col_name.startswith("1_"):
                     if param_mapping[col_name].startswith("search_"):
                         best_hypers[param_mapping[col_name]]=f"[{param_data_sorted[col_name].iloc[0]}]"
                     else:
                         best_hypers[param_mapping[col_name]]=f"{param_data_sorted[col_name].iloc[0]}"
+        print(f"Best Score:{score_max}\t {best_param_data_sorted}")
         
 
     return best_hypers

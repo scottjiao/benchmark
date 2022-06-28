@@ -148,6 +148,13 @@ class vis_data_collector():
             data=round(data,r)
         self.data_dict[f"re-{re}" ][f"epoch-{epoch}"][name]=data
 
+    def collect_in_run(self,data,name,re,r=4):
+        if f"re-{re}" not in self.data_dict.keys():
+            self.data_dict[f"re-{re}" ]={}
+        if type(data)==float:
+            data=round(data,r)
+        self.data_dict[f"re-{re}" ][name]=data
+
     def collect_whole_process(self,data,name):
         self.data_dict[name]=data
     def collect_whole_process_tensor(self,data,name):
